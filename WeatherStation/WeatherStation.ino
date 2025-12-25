@@ -10,7 +10,9 @@
 #include "page_humidity.h"
 #include "page_pressure.h"
 #include "page_gas.h"
-#include "page_comfort.h"   // NEW
+#include "page_comfort.h"
+#include "page_settings.h"
+#include "page_stats.h"
 
 // ================= USER CONFIG =================
 const char ssid[] = "outback_hut";
@@ -71,6 +73,16 @@ RingF gasSeries(GAS_SERIES_POINTS);       // gas kOhm
 
 RingF slpTrend(SLP_TREND_POINTS);         // sea-level pressure trend (1/min)
 uint32_t last_slp_trend_ms = 0;
+
+// Request statistics
+volatile uint32_t req_total = 0;
+volatile uint32_t req_api = 0;
+volatile uint32_t req_pages = 0;
+volatile uint32_t req_errors = 0;
+volatile uint32_t req_time_sum = 0;
+volatile uint32_t loop_count = 0;
+volatile uint32_t last_loop_rate_ms = 0;
+volatile float loop_rate_hz = 0;
 
 static void configureBME() {
   bme.setTemperatureOversampling(BME680_OS_4X);
@@ -430,6 +442,89 @@ static void sendJSONComfort(WiFiClient &c) {
   c.println("}");
 }
 
+// Stats API endpoint
+static void sendJSONStats(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  // Get WiFi info
+  long rssi = WiFi.RSSI();
+  IPAddress ip = WiFi.localIP();
+  byte mac[6];
+  WiFi.macAddress(mac);
+
+  // Arduino UNO R4 WiFi has 32KB SRAM
+  const uint32_t TOTAL_RAM = 32768;
+
+  // Estimate free RAM (rough approximation for ARM)
+  extern char _end;
+  extern char *__brkval;
+  char stackVar;
+  uint32_t freeRam = (uint32_t)&stackVar - (__brkval == 0 ? (uint32_t)&_end : (uint32_t)__brkval);
+
+  // Calculate average response time
+  float avgMs = (req_total > 0) ? (float)req_time_sum / (float)req_total : 0;
+
+  c.print("{\"ok\":true,");
+
+  // Network section
+  c.print("\"network\":{");
+  c.print("\"connected\":"); c.print(WiFi.status() == WL_CONNECTED ? "true" : "false"); c.print(",");
+  c.print("\"ip\":\""); c.print(ip); c.print("\",");
+  c.print("\"ssid\":\""); c.print(ssid); c.print("\",");
+  c.print("\"rssi\":"); c.print(rssi); c.print(",");
+
+  // MAC address
+  c.print("\"mac\":\"");
+  for (int i = 5; i >= 0; i--) {
+    if (mac[i] < 16) c.print("0");
+    c.print(mac[i], HEX);
+    if (i > 0) c.print(":");
+  }
+  c.print("\"");
+  c.print("},");
+
+  // Arduino section
+  c.print("\"arduino\":{");
+  c.print("\"uptime_ms\":"); c.print(millis()); c.print(",");
+  c.print("\"free_ram\":"); c.print(freeRam); c.print(",");
+  c.print("\"total_ram\":"); c.print(TOTAL_RAM); c.print(",");
+  c.print("\"loop_rate\":"); c.print(loop_rate_hz, 1);
+  c.print("},");
+
+  // Buffer section
+  c.print("\"buffers\":{");
+  c.print("\"temp_count\":"); c.print(tempSeries.count); c.print(",");
+  c.print("\"hum_count\":"); c.print(humSeries.count); c.print(",");
+  c.print("\"press_count\":"); c.print(pressSeries.count); c.print(",");
+  c.print("\"gas_count\":"); c.print(gasSeries.count); c.print(",");
+  c.print("\"slp_count\":"); c.print(slpTrend.count); c.print(",");
+  c.print("\"total_samples\":"); c.print(tempSeries.count + gasSeries.count);
+  c.print("},");
+
+  // Sensor section
+  c.print("\"sensor\":{");
+  c.print("\"temp_c\":"); c.print(t_raw, 2); c.print(",");
+  c.print("\"hum_pct\":"); c.print(h_raw, 2); c.print(",");
+  c.print("\"press_hpa\":"); c.print(p_raw_hpa, 2); c.print(",");
+  c.print("\"gas_kohm\":"); c.print(g_raw_kohm, 2);
+  c.print("},");
+
+  // Request stats section
+  c.print("\"requests\":{");
+  c.print("\"total\":"); c.print(req_total); c.print(",");
+  c.print("\"api\":"); c.print(req_api); c.print(",");
+  c.print("\"pages\":"); c.print(req_pages); c.print(",");
+  c.print("\"errors\":"); c.print(req_errors); c.print(",");
+  c.print("\"avg_ms\":"); c.print(avgMs, 1);
+  c.print("}");
+
+  c.println("}");
+}
+
 // Basic 404
 static void send404(WiFiClient &c) {
   c.println("HTTP/1.1 404 Not Found");
@@ -479,6 +574,15 @@ void setup() {
 void loop() {
   updateSampling();
 
+  // Calculate loop rate (update every second)
+  loop_count++;
+  uint32_t now = millis();
+  if (now - last_loop_rate_ms >= 1000) {
+    loop_rate_hz = (float)loop_count * 1000.0f / (float)(now - last_loop_rate_ms);
+    loop_count = 0;
+    last_loop_rate_ms = now;
+  }
+
   WiFiClient client = server.available();
   if (!client) return;
 
@@ -513,38 +617,73 @@ void loop() {
   Serial.print("Client "); Serial.print(rip);
   Serial.print(" -> "); Serial.println(reqLine);
 
+  unsigned long reqStart = millis();
+  bool isApi = false;
+  bool isPage = false;
+  bool isError = false;
+
   // Routing (pages)
   if (reqLine.startsWith("GET /temp")) {
     sendPageTemp(client);
+    isPage = true;
   } else if (reqLine.startsWith("GET /humidity")) {
     sendPageHumidity(client);
+    isPage = true;
   } else if (reqLine.startsWith("GET /pressure")) {
     sendPagePressure(client);
+    isPage = true;
   } else if (reqLine.startsWith("GET /gas")) {
     sendPageGas(client);
-  } else if (reqLine.startsWith("GET /comfort")) {        // NEW
+    isPage = true;
+  } else if (reqLine.startsWith("GET /comfort")) {
     sendPageComfort(client);
+    isPage = true;
+  } else if (reqLine.startsWith("GET /settings")) {
+    sendPageSettings(client);
+    isPage = true;
+  } else if (reqLine.startsWith("GET /stats")) {
+    sendPageStats(client);
+    isPage = true;
   } else if (reqLine.startsWith("GET / ")) {
     sendPageIndex(client);
+    isPage = true;
 
   // Routing (API)
   } else if (reqLine.startsWith("GET /api/dashboard")) {
     sendJSONDashboard(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/comfort")) {
     sendJSONComfort(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/stats")) {
+    sendJSONStats(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/temp")) {
     sendJSONTemp(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/humidity")) {
     sendJSONHumidity(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/pressure")) {
     sendJSONPressure(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/gas")) {
     sendJSONGas(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api ")) {
     sendJSONSummary(client);
+    isApi = true;
   } else {
     send404(client);
+    isError = true;
   }
+
+  // Update request statistics
+  req_total++;
+  if (isApi) req_api++;
+  if (isPage) req_pages++;
+  if (isError) req_errors++;
+  req_time_sum += (millis() - reqStart);
 
   delay(5);
   client.stop();
