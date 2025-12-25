@@ -76,6 +76,7 @@ static bool connectWiFi() {
     Serial.println("Connecting to WiFi...");
     wifiStatus = WiFi.begin(SECRET_SSID, SECRET_PASS);
     delay(1500);
+    yield();  // Allow WiFi stack to process during connection
   }
 
   Serial.println("WiFi connected");
@@ -119,6 +120,7 @@ static bool syncRTCFromNTP() {
     // Try a couple quick retries (NTP can be flaky on hotspots)
     for (int i = 0; i < 3; i++) {
       delay(250);
+      yield();  // Allow WiFi to process during blocking delay
       if (ntp.update()) break;
     }
   }
@@ -204,6 +206,9 @@ static void sampleEnv() {
     return;
   }
 
+  // Allow WiFi stack to process events during blocking operation
+  yield();
+
   const float tempC = bme.temperature;
   const float humPct = bme.humidity;
   const float pressHpa = bme.pressure / 100.0f;
@@ -224,6 +229,9 @@ static void sampleGas() {
     return;
   }
 
+  // Allow WiFi stack to process events during blocking operation
+  yield();
+
   float gasOhms = bme.gas_resistance; // ohms
   uint32_t t = MetricsClock::tickToNowUnix();
   gasHist.push(t, gasOhms);
@@ -243,16 +251,29 @@ void loop() {
   if (nowMs - lastEnvMs >= SAMPLE_ENV_MS) {
     lastEnvMs += SAMPLE_ENV_MS;
     sampleEnv();
+    // Check for HTTP clients after sensor read
+    WiFiClient client = server.available();
+    if (client) {
+      handleHttpClient(client, envHist, gasHist, ALTITUDE_M);
+    }
   }
 
   if (nowMs - lastGasMs >= SAMPLE_GAS_MS) {
     lastGasMs += SAMPLE_GAS_MS;
     sampleGas();
+    // Check for HTTP clients after sensor read
+    WiFiClient client = server.available();
+    if (client) {
+      handleHttpClient(client, envHist, gasHist, ALTITUDE_M);
+    }
   }
 
-  // Handle HTTP clients
+  // Check for HTTP clients frequently even when not sampling
   WiFiClient client = server.available();
   if (client) {
     handleHttpClient(client, envHist, gasHist, ALTITUDE_M);
   }
+
+  // Yield frequently to let WiFi stack process events
+  yield();
 }
