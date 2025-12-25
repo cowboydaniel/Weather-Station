@@ -55,7 +55,7 @@ static void sendPageComfort(WiFiClient &client) {
       </div>
       <div class="note" id="comfort_note">--</div>
 
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Wet-bulb</div><div class="v" id="wb">--</div></div>
         <div><div class="k">Abs humidity</div><div class="v" id="ah">--</div></div>
         <div><div class="k">VPD</div><div class="v" id="vpd">--</div></div>
@@ -82,13 +82,13 @@ static void sendPageComfort(WiFiClient &client) {
 
     <div class="card wide">
       <div class="label">Sun and moon</div>
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Sunrise</div><div class="v" id="sunrise">--</div></div>
         <div><div class="k">Sunset</div><div class="v" id="sunset">--</div></div>
         <div><div class="k">Day length</div><div class="v" id="daylen">--</div></div>
         <div><div class="k">Solar elevation</div><div class="v" id="elev">--</div></div>
       </div>
-      <div class="kpi" style="margin-top:10px">
+      <div class="kpi-grid" style="margin-top:10px">
         <div><div class="k">Solar azimuth</div><div class="v" id="az">--</div></div>
         <div><div class="k">Moon phase</div><div class="v" id="mphase">--</div></div>
         <div><div class="k">Moon illum</div><div class="v" id="millum">--</div></div>

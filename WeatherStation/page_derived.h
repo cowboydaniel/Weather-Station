@@ -70,7 +70,7 @@ static void sendPageDerived(WiFiClient &client) {
         <div class="forecast-text" id="forecast">--</div>
         <div class="forecast-detail" id="forecast-detail">Analyzing pressure trends...</div>
       </div>
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Pressure trend</div><div class="v" id="trend-dir">--</div></div>
         <div><div class="k">Change rate</div><div class="v" id="trend-rate">--</div></div>
         <div><div class="k">Sea-level pressure</div><div class="v" id="press-slp">--</div></div>
@@ -110,7 +110,7 @@ static void sendPageDerived(WiFiClient &client) {
 
     <div class="card wide">
       <div class="label">Comfort Summary</div>
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Overall</div><div class="v" id="comfort-overall">--</div></div>
         <div><div class="k">Outdoor activity</div><div class="v" id="outdoor-rec">--</div></div>
         <div><div class="k">Sleep quality</div><div class="v" id="sleep-qual">--</div></div>
@@ -156,7 +156,7 @@ static void sendPageDerived(WiFiClient &client) {
 
     <div class="card wide">
       <div class="label">Degree Days (Energy)</div>
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Heating DD</div><div class="v" id="hdd">--</div></div>
         <div><div class="k">Cooling DD</div><div class="v" id="cdd">--</div></div>
         <div><div class="k">Base temp</div><div class="v">18°C</div></div>

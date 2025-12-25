@@ -157,11 +157,22 @@ a.back, .pill{
   color:var(--muted);
   font-size:13px;
 }
+.kpis .kpi{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+}
 .kpi b{color:var(--text)}
 .kpi-grid{
   display:grid;
   grid-template-columns:repeat(4,1fr);
   gap:10px;
+}
+.kpi-grid > div{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:10px 12px;
+  background:rgba(255,255,255,0.04);
 }
 .kpi-label{
   font-size:10px;
@@ -179,9 +190,9 @@ a.back, .pill{
   color:var(--muted);
   font-weight:500;
 }
-.kpi .k, .kpi .v{ display:block; }
-.kpi .k{ font-size:11px; color:rgba(255,255,255,0.55); text-transform:uppercase; letter-spacing:0.3px; }
-.kpi .v{ margin-top:6px; font-size:16px; font-weight:650; color:rgba(255,255,255,0.9); }
+.kpi-grid .k, .kpi-grid .v{ display:block; }
+.kpi-grid .k{ font-size:11px; color:rgba(255,255,255,0.55); text-transform:uppercase; letter-spacing:0.3px; }
+.kpi-grid .v{ margin-top:6px; font-size:16px; font-weight:650; color:rgba(255,255,255,0.9); }
 
 .spark{
   margin-top:10px;
