@@ -351,10 +351,15 @@ static void processHttpClientState(HttpClientState& state, const EnvHistory& env
       yield();
     }
 
-    // Close connection
+    // Ensure all response data is sent, but don't close the connection.
+    // The browser will close it naturally after receiving "Connection: close" header.
+    // This allows large responses to fully transmit before connection closes.
     state.client.flush();
-    state.client.stop();
-    Serial.println("Client disconnected");
+
+    // Reset buffer for potential keep-alive requests
+    state.bufPos = 0;
+    state.headersReceived = false;
+    // Timeout (3 seconds) will force-close stale connections
   }
 }
 
