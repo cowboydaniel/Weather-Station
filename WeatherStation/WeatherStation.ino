@@ -245,35 +245,22 @@ void loop() {
     }
   }
 
+  // Handle HTTP clients (non-blocking state machine - processes all clients)
+  handleHttpClients(envHist, gasHist, ALTITUDE_M, server);
+
   // Sampling
   uint32_t nowMs = millis();
 
   if (nowMs - lastEnvMs >= SAMPLE_ENV_MS) {
     lastEnvMs += SAMPLE_ENV_MS;
     sampleEnv();
-    // Check for HTTP clients after sensor read
-    WiFiClient client = server.available();
-    if (client) {
-      handleHttpClient(client, envHist, gasHist, ALTITUDE_M);
-    }
   }
 
   if (nowMs - lastGasMs >= SAMPLE_GAS_MS) {
     lastGasMs += SAMPLE_GAS_MS;
     sampleGas();
-    // Check for HTTP clients after sensor read
-    WiFiClient client = server.available();
-    if (client) {
-      handleHttpClient(client, envHist, gasHist, ALTITUDE_M);
-    }
   }
 
-  // Check for HTTP clients frequently even when not sampling
-  WiFiClient client = server.available();
-  if (client) {
-    handleHttpClient(client, envHist, gasHist, ALTITUDE_M);
-  }
-
-  // Yield frequently to let WiFi stack process events
+  // Yield to let WiFi stack process events
   yield();
 }
