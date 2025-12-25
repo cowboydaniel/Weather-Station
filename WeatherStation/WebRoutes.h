@@ -13,6 +13,30 @@
 #include "Pages_Comfort.h"
 #include "Favicon.h"
 
+// Non-blocking HTTP client state machine
+struct HttpClientState {
+  WiFiClient client;
+  char reqBuffer[512];     // Request buffer
+  uint16_t bufPos;
+  uint32_t lastActivityMs;
+  bool headersReceived;
+  String url;
+
+  HttpClientState() : bufPos(0), lastActivityMs(0), headersReceived(false) {}
+
+  bool isConnected() {
+    return client.connected();
+  }
+
+  bool isTimedOut() {
+    return (millis() - lastActivityMs) > 3000; // 3 second timeout
+  }
+};
+
+// Client connection pool (max 2 concurrent clients)
+static HttpClientState clientStates[2];
+static uint8_t activeClientCount = 0;
+
 static void send404(WiFiClient& client) {
   client.println("HTTP/1.1 404 Not Found");
   client.println("Content-Type: text/plain; charset=utf-8");
@@ -224,104 +248,149 @@ static String buildComfortJson(const EnvHistory& env, const GasHistory& gas) {
   return j;
 }
 
-inline void handleHttpClient(WiFiClient& client, const EnvHistory& envHist, const GasHistory& gasHist, float altitudeM) {
-  Serial.println();
-  Serial.println("=== Client connected ===");
-  Serial.print("Client IP: ");
-  Serial.println(client.remoteIP());
+// Non-blocking HTTP request processing (called repeatedly from main loop)
+static void processHttpClientState(HttpClientState& state, const EnvHistory& envHist, const GasHistory& gasHist, float altitudeM) {
+  if (!state.isConnected()) {
+    return;  // Not active
+  }
 
-  // Set socket timeout to prevent blocking indefinitely
-  client.setTimeout(500);
+  if (state.isTimedOut()) {
+    Serial.println("Client timeout");
+    state.client.stop();
+    return;
+  }
 
-  // Read request line with timeout
-  String reqLine = "";
-  uint32_t start = millis();
-  while (client.connected() && (millis() - start) < 1000) {
-    if (client.available()) {
-      reqLine = client.readStringUntil('\n');
-      reqLine.trim();
+  // Read available data without blocking
+  while (state.client.available() && state.bufPos < sizeof(state.reqBuffer) - 1) {
+    char c = state.client.read();
+    state.reqBuffer[state.bufPos++] = c;
+    state.lastActivityMs = millis();
+
+    // Check for end of headers (\r\n\r\n)
+    if (state.bufPos >= 4 &&
+        state.reqBuffer[state.bufPos - 4] == '\r' &&
+        state.reqBuffer[state.bufPos - 3] == '\n' &&
+        state.reqBuffer[state.bufPos - 2] == '\r' &&
+        state.reqBuffer[state.bufPos - 1] == '\n') {
+      state.headersReceived = true;
       break;
     }
-    delay(1);
   }
 
-  if (reqLine.length() == 0) {
-    Serial.println("Timeout: no request line received");
-    client.stop();
-    Serial.println("Client disconnected");
-    return;
-  }
-
-  Serial.print("Request: ");
-  Serial.println(reqLine);
-
-  // Drain headers with timeout
-  start = millis();
-  while (client.connected() && (millis() - start) < 1000) {
-    if (!client.available()) {
-      delay(1);
-      continue;
+  // If headers received, parse and respond
+  if (state.headersReceived) {
+    // Parse request line
+    String reqLine = "";
+    for (uint16_t i = 0; i < state.bufPos && state.reqBuffer[i] != '\n'; i++) {
+      if (state.reqBuffer[i] != '\r') {
+        reqLine += state.reqBuffer[i];
+      }
     }
-    String line = client.readStringUntil('\n');
-    if (line == "\r" || line.length() == 0) break;
-  }
 
-  // Basic parse: "GET /path HTTP/1.1"
-  if (!reqLine.startsWith("GET ")) {
-    send404(client);
-    client.flush();
-    delay(2);
-    client.stop();
+    Serial.print("Request: ");
+    Serial.println(reqLine);
+
+    // Parse: "GET /path HTTP/1.1"
+    if (reqLine.startsWith("GET ")) {
+      int sp1 = reqLine.indexOf(' ');
+      int sp2 = reqLine.indexOf(' ', sp1 + 1);
+      String url = reqLine.substring(sp1 + 1, sp2);
+
+      // Route request (all with yield() to prevent blocking)
+      if (url == "/favicon.svg") {
+        sendFaviconSvg(state.client);
+        yield();
+      }
+      else if (url.startsWith("/api/latest")) {
+        sendJson(state.client, jsonLatest(envHist, gasHist, altitudeM));
+        yield();
+      }
+      else if (url.startsWith("/api/history")) {
+        String m = urlParam(url, "m");
+        if (m == "temp") sendJson(state.client, jsonHistoryEnv(envHist, "temp"));
+        else if (m == "humidity") sendJson(state.client, jsonHistoryEnv(envHist, "humidity"));
+        else if (m == "pressure") sendJson(state.client, jsonHistoryEnv(envHist, "pressure"));
+        else if (m == "gas") sendJson(state.client, jsonHistoryGas(gasHist));
+        else sendJson(state.client, "[]");
+        yield();
+      }
+      else if (url.startsWith("/api/comfort")) {
+        sendJson(state.client, buildComfortJson(envHist, gasHist));
+        yield();
+      }
+      else if (url == "/" || url.startsWith("/?")) {
+        sendHtml(state.client, pageDashboard());
+        yield();
+      }
+      else if (url.startsWith("/graph/temp")) {
+        sendHtml(state.client, pageGraphTemp());
+        yield();
+      }
+      else if (url.startsWith("/graph/humidity")) {
+        sendHtml(state.client, pageGraphHumidity());
+        yield();
+      }
+      else if (url.startsWith("/graph/pressure")) {
+        sendHtml(state.client, pageGraphPressure());
+        yield();
+      }
+      else if (url.startsWith("/graph/gas")) {
+        sendHtml(state.client, pageGraphGas());
+        yield();
+      }
+      else if (url.startsWith("/comfort")) {
+        sendHtml(state.client, pageComfort());
+        yield();
+      }
+      else {
+        send404(state.client);
+        yield();
+      }
+    } else {
+      send404(state.client);
+      yield();
+    }
+
+    // Close connection
+    state.client.flush();
+    state.client.stop();
     Serial.println("Client disconnected");
-    return;
+  }
+}
+
+// Non-blocking HTTP handler - called from main loop to accept new connections
+inline void handleHttpClients(const EnvHistory& envHist, const GasHistory& gasHist, float altitudeM, WiFiServer& server) {
+  // Clean up old/disconnected clients
+  for (uint8_t i = 0; i < 2; i++) {
+    if (!clientStates[i].isConnected() && clientStates[i].bufPos > 0) {
+      clientStates[i].bufPos = 0;
+      clientStates[i].headersReceived = false;
+    }
   }
 
-  int sp1 = reqLine.indexOf(' ');
-  int sp2 = reqLine.indexOf(' ', sp1 + 1);
-  String url = reqLine.substring(sp1 + 1, sp2);
+  // Accept new connections
+  WiFiClient newClient = server.available();
+  if (newClient) {
+    // Find empty slot
+    for (uint8_t i = 0; i < 2; i++) {
+      if (!clientStates[i].isConnected()) {
+        Serial.println("=== Client connected ===");
+        Serial.print("Client IP: ");
+        Serial.println(newClient.remoteIP());
 
-  // Routing
-  if (url == "/favicon.svg") {
-    sendFaviconSvg(client);
-  }
-  else if (url.startsWith("/api/latest")) {
-    sendJson(client, jsonLatest(envHist, gasHist, altitudeM));
-  }
-  else if (url.startsWith("/api/history")) {
-    String m = urlParam(url, "m");
-    if (m == "temp") sendJson(client, jsonHistoryEnv(envHist, "temp"));
-    else if (m == "humidity") sendJson(client, jsonHistoryEnv(envHist, "humidity"));
-    else if (m == "pressure") sendJson(client, jsonHistoryEnv(envHist, "pressure"));
-    else if (m == "gas") sendJson(client, jsonHistoryGas(gasHist));
-    else sendJson(client, "[]");
-  }
-  else if (url.startsWith("/api/comfort")) {
-    sendJson(client, buildComfortJson(envHist, gasHist));
-  }
-  else if (url == "/" || url.startsWith("/?")) {
-    sendHtml(client, pageDashboard());
-  }
-  else if (url.startsWith("/graph/temp")) {
-    sendHtml(client, pageGraphTemp());
-  }
-  else if (url.startsWith("/graph/humidity")) {
-    sendHtml(client, pageGraphHumidity());
-  }
-  else if (url.startsWith("/graph/pressure")) {
-    sendHtml(client, pageGraphPressure());
-  }
-  else if (url.startsWith("/graph/gas")) {
-    sendHtml(client, pageGraphGas());
-  }
-  else if (url.startsWith("/comfort")) {
-    sendHtml(client, pageComfort());
-  }
-  else {
-    send404(client);
+        clientStates[i].client = newClient;
+        clientStates[i].bufPos = 0;
+        clientStates[i].headersReceived = false;
+        clientStates[i].lastActivityMs = millis();
+        break;
+      }
+    }
   }
 
-  client.flush();
-  delay(2);
-  client.stop();
-  Serial.println("Client disconnected");
+  // Process all active client states (non-blocking)
+  for (uint8_t i = 0; i < 2; i++) {
+    if (clientStates[i].isConnected()) {
+      processHttpClientState(clientStates[i], envHist, gasHist, altitudeM);
+    }
+  }
 }
