@@ -14,6 +14,7 @@
 #include "page_derived.h"
 #include "page_settings.h"
 #include "page_stats.h"
+#include "static_assets.h"
 
 // ================= USER CONFIG =================
 const char ssid[] = "outback_hut";
@@ -552,6 +553,34 @@ static void sendJSONStats(WiFiClient &c) {
   c.println("}");
 }
 
+// Static assets
+static void sendStaticCSS(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: text/css; charset=utf-8");
+  c.println("Cache-Control: public, max-age=31536000, immutable");
+  c.println("Connection: close");
+  c.println();
+  c.print(APP_CSS);
+}
+
+static void sendStaticJS(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/javascript; charset=utf-8");
+  c.println("Cache-Control: public, max-age=31536000, immutable");
+  c.println("Connection: close");
+  c.println();
+  c.print(APP_JS);
+}
+
+static void sendStaticFavicon(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: image/svg+xml");
+  c.println("Cache-Control: public, max-age=31536000, immutable");
+  c.println("Connection: close");
+  c.println();
+  c.print(FAVICON_SVG);
+}
+
 // Basic 404
 static void send404(WiFiClient &c) {
   c.println("HTTP/1.1 404 Not Found");
@@ -650,7 +679,16 @@ void loop() {
   bool isError = false;
 
   // Routing (pages)
-  if (reqLine.startsWith("GET /temp")) {
+  if (reqLine.startsWith("GET /static/app.css")) {
+    sendStaticCSS(client);
+    isPage = true;
+  } else if (reqLine.startsWith("GET /static/app.js")) {
+    sendStaticJS(client);
+    isPage = true;
+  } else if (reqLine.startsWith("GET /static/favicon.svg") || reqLine.startsWith("GET /favicon.ico")) {
+    sendStaticFavicon(client);
+    isPage = true;
+  } else if (reqLine.startsWith("GET /temp")) {
     sendPageTemp(client);
     isPage = true;
   } else if (reqLine.startsWith("GET /humidity")) {

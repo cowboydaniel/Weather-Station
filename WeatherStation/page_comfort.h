@@ -16,95 +16,12 @@ static void sendPageComfort(WiFiClient &client) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Comfort</title>
 
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='30%25' cy='30%25' r='80%25'%3E%3Cstop offset='0%25' stop-color='%23baffd7'/%3E%3Cstop offset='45%25' stop-color='%234be3a6'/%3E%3Cstop offset='100%25' stop-color='%2306b38a'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='6' y='6' width='52' height='52' rx='14' fill='url(%23g)'/%3E%3Cpath d='M32 18c8 10 12 15 12 22a12 12 0 1 1-24 0c0-7 4-12 12-22z' fill='white' opacity='0.95'/%3E%3C/svg%3E">
-
-<style>
-:root{
-  --bg:#070a18;
-  --panel: rgba(255,255,255,0.06);
-  --panel2: rgba(255,255,255,0.04);
-  --border: rgba(255,255,255,0.12);
-  --text: rgba(255,255,255,0.92);
-  --muted: rgba(255,255,255,0.62);
-  --shadow: 0 16px 40px rgba(0,0,0,0.45);
-  --radius: 20px;
-}
-*{ box-sizing:border-box; }
-body{
-  margin:0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  color:var(--text);
-  background:
-    radial-gradient(1200px 700px at 20% 10%, rgba(120,255,200,0.20), transparent 60%),
-    radial-gradient(900px 600px at 80% 25%, rgba(110,160,255,0.14), transparent 55%),
-    radial-gradient(800px 800px at 60% 115%, rgba(255,110,180,0.10), transparent 60%),
-    var(--bg);
-  min-height:100vh;
-}
-.wrap{ max-width: 1020px; margin:0 auto; padding:24px 16px 44px; }
-.top{
-  display:flex; justify-content:space-between; align-items:flex-end; gap:12px;
-}
-h1{ margin:0; font-size:20px; }
-.sub{ margin-top:6px; font-size:13px; color:var(--muted); line-height:1.4; }
-a.back{
-  text-decoration:none;
-  color:rgba(255,255,255,0.88);
-  border:1px solid rgba(255,255,255,0.14);
-  background:rgba(255,255,255,0.05);
-  padding:10px 12px;
-  border-radius:999px;
-  font-weight:650;
-  font-size:13px;
-}
-.grid{ margin-top:14px; display:grid; grid-template-columns:repeat(12,1fr); gap:12px; }
-.card{
-  grid-column:span 6;
-  background:linear-gradient(180deg,var(--panel), rgba(255,255,255,0.03));
-  border:1px solid var(--border);
-  border-radius:var(--radius);
-  box-shadow:var(--shadow);
-  padding:16px;
-  backdrop-filter: blur(12px);
-}
-.wide{ grid-column:span 12; }
-.label{ font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:var(--muted); }
-.big{ margin-top:8px; font-size:34px; font-weight:650; letter-spacing:-0.6px; }
-.unit{ font-size:14px; color:var(--muted); margin-left:8px; font-weight:500; }
-.row{ margin-top:10px; display:flex; justify-content:space-between; gap:12px; font-size:12px; color:var(--muted); }
-.row b{ color:rgba(255,255,255,0.88); font-weight:650; }
-.tag{
-  display:inline-flex; align-items:center;
-  padding:8px 12px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,0.14);
-  background:rgba(255,255,255,0.05);
-  font-weight:650;
-}
-.note{ margin-top:10px; color:rgba(255,255,255,0.45); font-size:12px; line-height:1.5; }
-canvas{
-  width:100%;
-  height:220px;
-  display:block;
-  border-radius:14px;
-  background:rgba(0,0,0,0.20);
-  border:1px solid rgba(255,255,255,0.10);
-}
-.kpi{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px; }
-.kpi > div{
-  border:1px solid rgba(255,255,255,0.12);
-  border-radius:14px;
-  padding:10px 12px;
-  background:rgba(255,255,255,0.04);
-}
-.kpi .k{ font-size:11px; color:rgba(255,255,255,0.55); text-transform:uppercase; letter-spacing:0.3px; }
-.kpi .v{ margin-top:6px; font-size:16px; font-weight:650; color:rgba(255,255,255,0.9); }
-@media (max-width:860px){ .kpi{ grid-template-columns:repeat(2,1fr);} }
-@media (max-width:760px){ .card{ grid-column:span 12; } }
-</style>
+<link rel="icon" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js"></script>
 </head>
 
-<body>
+<body class="page-comfort" style="--bg-layer: radial-gradient(1200px 700px at 20% 10%, rgba(120,255,200,0.20), transparent 60%), radial-gradient(900px 600px at 80% 25%, rgba(110,160,255,0.14), transparent 55%), radial-gradient(800px 800px at 60% 115%, rgba(255,110,180,0.10), transparent 60%), var(--bg); --wrap-max:1020px; --wrap-pad:24px 16px 44px;">
 <div class="wrap">
   <div class="top">
     <div>
@@ -138,7 +55,7 @@ canvas{
       </div>
       <div class="note" id="comfort_note">--</div>
 
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Wet-bulb</div><div class="v" id="wb">--</div></div>
         <div><div class="k">Abs humidity</div><div class="v" id="ah">--</div></div>
         <div><div class="k">VPD</div><div class="v" id="vpd">--</div></div>
@@ -150,7 +67,7 @@ canvas{
     <div class="card wide">
       <div class="label">Dew point history</div>
       <div style="margin-top:12px">
-        <canvas id="cv_dp"></canvas>
+        <canvas id="cv_dp" class="chart chart-sm"></canvas>
       </div>
       <div class="note">Derived in-browser from your temp and humidity history.</div>
     </div>
@@ -158,20 +75,20 @@ canvas{
     <div class="card wide">
       <div class="label">Heat index history</div>
       <div style="margin-top:12px">
-        <canvas id="cv_hi"></canvas>
+        <canvas id="cv_hi" class="chart chart-sm"></canvas>
       </div>
       <div class="note">Derived in-browser from your temp and humidity history.</div>
     </div>
 
     <div class="card wide">
       <div class="label">Sun and moon</div>
-      <div class="kpi">
+      <div class="kpi-grid">
         <div><div class="k">Sunrise</div><div class="v" id="sunrise">--</div></div>
         <div><div class="k">Sunset</div><div class="v" id="sunset">--</div></div>
         <div><div class="k">Day length</div><div class="v" id="daylen">--</div></div>
         <div><div class="k">Solar elevation</div><div class="v" id="elev">--</div></div>
       </div>
-      <div class="kpi" style="margin-top:10px">
+      <div class="kpi-grid" style="margin-top:10px">
         <div><div class="k">Solar azimuth</div><div class="v" id="az">--</div></div>
         <div><div class="k">Moon phase</div><div class="v" id="mphase">--</div></div>
         <div><div class="k">Moon illum</div><div class="v" id="millum">--</div></div>
@@ -187,24 +104,8 @@ canvas{
 <script>
 const el = (id) => document.getElementById(id);
 
-const cvDP = el('cv_dp');
-const cvHI = el('cv_hi');
-const ctxDP = cvDP.getContext('2d');
-const ctxHI = cvHI.getContext('2d');
-
-function resizeCanvas(cv){
-  const r = cv.getBoundingClientRect();
-  const dpr = Math.max(1, window.devicePixelRatio || 1);
-  cv.width = Math.floor(r.width * dpr);
-  cv.height = Math.floor(220 * dpr);
-}
-
-function resizeAll(){
-  resizeCanvas(cvDP);
-  resizeCanvas(cvHI);
-}
-window.addEventListener('resize', resizeAll);
-resizeAll();
+const dpChart = setupCanvas('cv_dp', 220);
+const hiChart = setupCanvas('cv_hi', 220);
 
 function dewPointC(tC, rh){
   rh = Math.max(1, Math.min(rh, 100));
@@ -266,42 +167,8 @@ function moldTag(dp, rh){
   return "mold: low";
 }
 
-function drawSeries(ctx, cv, series){
-  const w = cv.width, h = cv.height;
-  ctx.clearRect(0,0,w,h);
-
-  const data = series.filter(v => typeof v === 'number' && isFinite(v));
-  if (data.length < 2) return;
-
-  let mn = data[0], mx = data[0];
-  for (const v of data){ if (v < mn) mn = v; if (v > mx) mx = v; }
-  let pad = Math.max(0.2, (mx - mn) * 0.12);
-  mn -= pad; mx += pad;
-  let rng = mx - mn; if (rng < 1e-6) rng = 1;
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-  ctx.lineWidth = 1;
-  for(let i=1;i<6;i++){
-    const y = (h*i)/6;
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
-  }
-
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(255,255,255,0.88)';
-  ctx.beginPath();
-  for(let i=0;i<series.length;i++){
-    const v = (typeof series[i] === 'number' && isFinite(series[i])) ? series[i] : null;
-    const x = (i/(series.length-1))*w;
-    const y = v===null ? h/2 : (h - ((v - mn)/rng)*h);
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  }
-  ctx.stroke();
-
-  ctx.globalAlpha = 0.10;
-  ctx.fillStyle = 'rgba(255,255,255,1)';
-  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath();
-  ctx.fill();
-  ctx.globalAlpha = 1;
+function renderSeries(chart, series){
+  drawLineSeries(chart.ctx, chart.cv, series, {padFraction:0.12, minPad:0.2});
 }
 
 // ======= Astronomy (browser-side) =======
@@ -575,8 +442,8 @@ async function tick(){
     }
     lastSeriesCount = serverCount;
 
-    drawSeries(ctxDP, cvDP, cachedDps);
-    drawSeries(ctxHI, cvHI, cachedHis);
+    renderSeries(dpChart, cachedDps);
+    renderSeries(hiChart, cachedHis);
 
   } catch(e) {
     // fail quietly
