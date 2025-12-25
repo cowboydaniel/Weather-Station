@@ -4,7 +4,7 @@
 static void sendPageGas(WiFiClient &client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html; charset=utf-8");
-  client.println("Cache-Control: no-store");
+  client.println("Cache-Control: public, max-age=300");
   client.println("Connection: close");
   client.println();
 
