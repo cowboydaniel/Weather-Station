@@ -129,7 +129,7 @@ async function tick(){
     draw(B.ctx, B.cv, j.slp_trend_series || []);
   }catch(e){}
 }
-tick(); setInterval(tick, 1000);
+tick(); setInterval(tick, 2000);  // 2s polling - data updates at 1Hz anyway
 </script>
 </body></html>
 )HTML");
