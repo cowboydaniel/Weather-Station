@@ -230,14 +230,38 @@ inline void handleHttpClient(WiFiClient& client, const EnvHistory& envHist, cons
   Serial.print("Client IP: ");
   Serial.println(client.remoteIP());
 
-  // Read request line
-  String reqLine = client.readStringUntil('\n');
-  reqLine.trim();
+  // Set socket timeout to prevent blocking indefinitely
+  client.setTimeout(500);
+
+  // Read request line with timeout
+  String reqLine = "";
+  uint32_t start = millis();
+  while (client.connected() && (millis() - start) < 1000) {
+    if (client.available()) {
+      reqLine = client.readStringUntil('\n');
+      reqLine.trim();
+      break;
+    }
+    delay(1);
+  }
+
+  if (reqLine.length() == 0) {
+    Serial.println("Timeout: no request line received");
+    client.stop();
+    Serial.println("Client disconnected");
+    return;
+  }
+
   Serial.print("Request: ");
   Serial.println(reqLine);
 
-  // Drain headers
-  while (client.connected()) {
+  // Drain headers with timeout
+  start = millis();
+  while (client.connected() && (millis() - start) < 1000) {
+    if (!client.available()) {
+      delay(1);
+      continue;
+    }
     String line = client.readStringUntil('\n');
     if (line == "\r" || line.length() == 0) break;
   }
@@ -245,6 +269,8 @@ inline void handleHttpClient(WiFiClient& client, const EnvHistory& envHist, cons
   // Basic parse: "GET /path HTTP/1.1"
   if (!reqLine.startsWith("GET ")) {
     send404(client);
+    client.flush();
+    delay(2);
     client.stop();
     Serial.println("Client disconnected");
     return;
@@ -294,6 +320,8 @@ inline void handleHttpClient(WiFiClient& client, const EnvHistory& envHist, cons
     send404(client);
   }
 
+  client.flush();
+  delay(2);
   client.stop();
   Serial.println("Client disconnected");
 }
