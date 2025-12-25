@@ -266,6 +266,14 @@ h1{ margin:0; font-size:22px; letter-spacing:0.2px; }
       <div class="footer">Dew point, heat index, and quick human heuristics.</div>
     </a>
 
+    <a class="card" href="/derived">
+      <div class="label">Derived Metrics</div>
+      <div class="big"><span id="forecast">--</span></div>
+      <div class="pair"><span>Air quality</span><b id="aqi">--</b></div>
+      <div class="pair"><span>Frost risk</span><b id="frost">--</b></div>
+      <div class="footer">AQI, cloud base, frost, humidex, GDD, forecast.</div>
+    </a>
+
     <div class="card wide">
       <div class="label">Storm heuristic</div>
       <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
@@ -340,6 +348,47 @@ function sparkline(points, polyId, fillId){
   pf.setAttribute("d", d);
 }
 
+// Derived metrics helpers
+function gasToAQI(g) {
+  if (!isFinite(g) || g <= 0) return NaN;
+  if (g > 400) return Math.max(0, 50 - (g - 400) * 0.1);
+  if (g > 200) return 50 + (400 - g) * 0.25;
+  if (g > 100) return 100 + (200 - g) * 0.5;
+  if (g > 50) return 150 + (100 - g) * 1;
+  return Math.min(500, 200 + (50 - g) * 6);
+}
+
+function aqiLabel(a) {
+  if (!isFinite(a)) return '--';
+  if (a <= 50) return 'Good';
+  if (a <= 100) return 'OK';
+  if (a <= 150) return 'Sens.';
+  return 'Poor';
+}
+
+function frostRisk(t, dp) {
+  if (!isFinite(t) || !isFinite(dp)) return '--';
+  const ground = t - 3;
+  if (ground <= 0) return 'Now';
+  if (t <= 4 && dp <= 2) return 'High';
+  if (t <= 6 && dp <= 4) return 'Mod';
+  if (t <= 10 && dp <= 6) return 'Low';
+  return 'None';
+}
+
+function quickForecast(slp, tend) {
+  if (!isFinite(slp) || !isFinite(tend)) return '--';
+  if (tend < -3) return 'Stormy';
+  if (tend < -1.5) return 'Rain likely';
+  if (tend < -0.5) return 'Unsettled';
+  if (tend > 3) return 'Clearing';
+  if (tend > 1.5) return 'Improving';
+  if (tend > 0.5) return 'Fair';
+  if (slp > 1020) return 'Settled';
+  if (slp > 1010) return 'Stable';
+  return 'Cloudy';
+}
+
 // Use combined dashboard endpoint for efficiency (single request instead of 3)
 async function tick(){
   try{
@@ -363,6 +412,12 @@ async function tick(){
 
     el('storm_score').textContent = (typeof j.derived.storm_score === 'number') ? j.derived.storm_score : '--';
     el('storm_badge').textContent = (j.derived.storm || '--') + " (" + (j.derived.storm_score ?? '--') + ")";
+
+    // Derived metrics card
+    const aqi = gasToAQI(j.raw.gas_kohm);
+    el('forecast').textContent = quickForecast(j.derived.slp_hpa, j.derived.press_tendency_hpa_hr);
+    el('aqi').textContent = isFinite(aqi) ? Math.round(aqi) + ' ' + aqiLabel(aqi) : '--';
+    el('frost').textContent = frostRisk(j.raw.temp_c, j.derived.dew_point_c);
 
     // Sparklines from combined response
     sparkline(j.slp_trend || [], "slpLine", "slpFill");

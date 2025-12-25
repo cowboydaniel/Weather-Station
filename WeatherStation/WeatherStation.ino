@@ -11,6 +11,7 @@
 #include "page_pressure.h"
 #include "page_gas.h"
 #include "page_comfort.h"
+#include "page_derived.h"
 #include "page_settings.h"
 #include "page_stats.h"
 
@@ -442,6 +443,34 @@ static void sendJSONComfort(WiFiClient &c) {
   c.println("}");
 }
 
+// Derived metrics API endpoint
+static void sendJSONDerived(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  c.print("{\"ok\":true,");
+  // Raw values
+  c.print("\"raw\":{");
+  c.print("\"temp_c\":"); c.print(t_raw,2); c.print(",");
+  c.print("\"hum_pct\":"); c.print(h_raw,2); c.print(",");
+  c.print("\"press_hpa\":"); c.print(p_raw_hpa,2); c.print(",");
+  c.print("\"gas_kohm\":"); c.print(g_raw_kohm,2);
+  c.print("},");
+  // Derived values
+  c.print("\"derived\":{");
+  c.print("\"slp_hpa\":"); c.print(cached_slp,2); c.print(",");
+  c.print("\"dew_point_c\":"); c.print(cached_dp,2); c.print(",");
+  c.print("\"heat_index_c\":"); c.print(cached_hi,2); c.print(",");
+  c.print("\"press_tendency_hpa_hr\":"); c.print(cached_tend,2); c.print(",");
+  c.print("\"press_tendency\":\""); c.print(tendencyLabel(cached_tend)); c.print("\",");
+  c.print("\"storm_score\":"); c.print(cached_storm);
+  c.print("}}");
+  c.println();
+}
+
 // Stats API endpoint
 static void sendJSONStats(WiFiClient &c) {
   c.println("HTTP/1.1 200 OK");
@@ -636,6 +665,9 @@ void loop() {
   } else if (reqLine.startsWith("GET /comfort")) {
     sendPageComfort(client);
     isPage = true;
+  } else if (reqLine.startsWith("GET /derived")) {
+    sendPageDerived(client);
+    isPage = true;
   } else if (reqLine.startsWith("GET /settings")) {
     sendPageSettings(client);
     isPage = true;
@@ -652,6 +684,9 @@ void loop() {
     isApi = true;
   } else if (reqLine.startsWith("GET /api/comfort")) {
     sendJSONComfort(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/derived")) {
+    sendJSONDerived(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/stats")) {
     sendJSONStats(client);
