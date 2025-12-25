@@ -29,7 +29,7 @@ struct HttpClientState {
   }
 
   bool isTimedOut() {
-    return (millis() - lastActivityMs) > 3000; // 3 second timeout
+    return (millis() - lastActivityMs) > 10000; // 10 second timeout
   }
 };
 
@@ -351,15 +351,15 @@ static void processHttpClientState(HttpClientState& state, const EnvHistory& env
       yield();
     }
 
-    // Ensure all response data is sent, but don't close the connection.
-    // The browser will close it naturally after receiving "Connection: close" header.
-    // This allows large responses to fully transmit before connection closes.
+    // Ensure all response data is sent before closing
     state.client.flush();
 
-    // Reset buffer for potential keep-alive requests
+    // Close connection - we sent "Connection: close" header so browser expects this
+    state.client.stop();
+
+    // Reset state for next client
     state.bufPos = 0;
     state.headersReceived = false;
-    // Timeout (3 seconds) will force-close stale connections
   }
 }
 
