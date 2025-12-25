@@ -187,7 +187,7 @@ a.back{
     </div>
 
     <div class="card wide">
-      <div class="label">Weather Forecast</div>
+      <div class="label">Zambretti Weather Forecast</div>
       <div class="forecast-box">
         <div class="forecast-text" id="forecast">--</div>
         <div class="forecast-detail" id="forecast-detail">Analyzing pressure trends...</div>
@@ -195,9 +195,10 @@ a.back{
       <div class="kpi">
         <div><div class="k">Pressure trend</div><div class="v" id="trend-dir">--</div></div>
         <div><div class="k">Change rate</div><div class="v" id="trend-rate">--</div></div>
-        <div><div class="k">3hr pressure</div><div class="v" id="press-3hr">--</div></div>
+        <div><div class="k">Sea-level pressure</div><div class="v" id="press-slp">--</div></div>
         <div><div class="k">Confidence</div><div class="v" id="forecast-conf">--</div></div>
       </div>
+      <div class="note">Classic Zambretti algorithm (1915) adapted for digital use. Based on barometric pressure, trend, and season.</div>
     </div>
 
     <div class="card">
@@ -238,6 +239,58 @@ a.back{
         <div><div class="k">Respiratory</div><div class="v" id="resp-comfort">--</div></div>
       </div>
       <div class="note" id="comfort-advice">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Mold Risk Index</div>
+      <div class="big"><span id="mold-tag" class="tag">--</span></div>
+      <div class="meter" style="margin-top:14px;">
+        <div class="meter-fill" id="mold-fill" style="width:0%; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);"></div>
+      </div>
+      <div class="row"><span>Risk score</span><b id="mold-score">-- %</b></div>
+      <div class="row"><span>Humidity</span><b id="mold-rh">-- %</b></div>
+      <div class="note">Based on temperature and humidity. Mold thrives at 20-30°C with RH > 70%. Monitor sustained high readings.</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Air Density</div>
+      <div class="big"><span id="air-density">--</span><span class="unit">kg/m³</span></div>
+      <div class="row"><span>Pressure altitude</span><b id="press-alt">-- ft</b></div>
+      <div class="row"><span>Density altitude</span><b id="density-alt">-- ft</b></div>
+      <div class="note">Air density affects combustion, lift, and athletic performance. Density altitude is key for aviation.</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Thom Discomfort Index</div>
+      <div class="big"><span id="thom-idx">--</span><span class="unit">°C</span></div>
+      <div class="row"><span>Comfort level</span><b id="thom-cat">--</b></div>
+      <div class="row"><span>Vs heat index</span><b id="thom-vs-hi">--</b></div>
+      <div class="note">Simple thermal discomfort indicator. More straightforward than heat index for general comfort assessment.</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Air Enthalpy</div>
+      <div class="big"><span id="enthalpy">--</span><span class="unit">kJ/kg</span></div>
+      <div class="row"><span>HVAC load indicator</span><b id="hvac-load">--</b></div>
+      <div class="row"><span>Energy benchmark</span><b id="enthalpy-bench">--</b></div>
+      <div class="note">Total heat content of air. Used in HVAC to calculate cooling/heating loads. Ideal indoor: 40-60 kJ/kg.</div>
+    </div>
+
+    <div class="card wide">
+      <div class="label">Degree Days (Energy)</div>
+      <div class="kpi">
+        <div><div class="k">Heating DD</div><div class="v" id="hdd">--</div></div>
+        <div><div class="k">Cooling DD</div><div class="v" id="cdd">--</div></div>
+        <div><div class="k">Base temp</div><div class="v">18°C</div></div>
+        <div><div class="k">Energy mode</div><div class="v" id="energy-mode">--</div></div>
+      </div>
+      <div class="meter" style="margin-top:14px; background: linear-gradient(90deg, #3b82f6 0%, #3b82f6 50%, #ef4444 50%, #ef4444 100%);">
+        <div class="meter-marker" id="dd-marker" style="left:50%;"></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-top:4px;">
+        <span>Heating needed</span><span>Comfort zone</span><span>Cooling needed</span>
+      </div>
+      <div class="note">Degree days measure energy demand. HDD indicates heating needs, CDD indicates cooling needs. Base 18°C is standard.</div>
     </div>
   </div>
 </div>
@@ -425,6 +478,190 @@ function plantGrowthPotential(gdd) {
   return "rapid growth";
 }
 
+// Zambretti weather forecast algorithm
+// Classic barometric forecaster from 1915, adapted for digital use
+function zambrettiForecast(slp, tendHpaHr, month) {
+  if (!isFinite(slp) || !isFinite(tendHpaHr)) {
+    return { text: "Insufficient data", detail: "Need pressure data", z: null, confidence: "Low" };
+  }
+
+  // Normalize pressure to Zambretti scale (950-1050 hPa -> 0-32)
+  const pNorm = Math.max(0, Math.min(32, Math.round((slp - 950) * 0.32)));
+
+  // Determine trend: rising, falling, or steady
+  const trend = tendHpaHr > 0.5 ? 'rising' : tendHpaHr < -0.5 ? 'falling' : 'steady';
+
+  // Season adjustment (Southern hemisphere - swap if needed)
+  const isSummer = (month >= 11 || month <= 2); // Nov-Feb for southern hemisphere
+  const seasonAdj = isSummer ? 1 : -1;
+
+  // Zambretti lookup tables
+  const risingForecast = [
+    "Settled fine", "Fine weather", "Becoming fine", "Fine, becoming less settled",
+    "Fine, possible showers", "Fairly fine, improving", "Fairly fine, possible showers early",
+    "Fairly fine, showery later", "Showery early, improving", "Changeable, mending",
+    "Fairly fine, showers likely", "Rather unsettled clearing later", "Unsettled, probably improving",
+    "Showery, bright intervals", "Showery, becoming more unsettled", "Changeable, some rain",
+    "Unsettled, short fine intervals", "Unsettled, rain later", "Unsettled, rain at times",
+    "Very unsettled, finer at times", "Rain at times, worse later", "Rain at times, becoming very unsettled",
+    "Rain at frequent intervals", "Very unsettled, rain", "Stormy, possibly improving",
+    "Stormy, much rain"
+  ];
+
+  const fallingForecast = [
+    "Settled fine", "Fine weather", "Fine, becoming less settled", "Fairly fine, showery later",
+    "Showery, bright intervals", "Changeable, some rain", "Unsettled, rain at times",
+    "Rain at frequent intervals", "Very unsettled, rain", "Stormy, much rain",
+    "Stormy, possibly improving", "Stormy"
+  ];
+
+  const steadyForecast = [
+    "Settled fine", "Fine weather", "Fine, possibly showers", "Fairly fine, showers likely",
+    "Showery, bright intervals", "Changeable, light rain", "Unsettled, light rain",
+    "Rain at times", "Very unsettled, rain", "Stormy"
+  ];
+
+  let zNum, forecast;
+
+  if (trend === 'rising') {
+    // Rising: higher pressure = better weather
+    zNum = Math.min(25, Math.max(0, Math.round(pNorm * 0.8) + seasonAdj));
+    forecast = risingForecast[zNum] || risingForecast[0];
+  } else if (trend === 'falling') {
+    // Falling: lower pressure = worse weather
+    zNum = Math.min(11, Math.max(0, Math.round((32 - pNorm) * 0.35) - seasonAdj));
+    forecast = fallingForecast[zNum] || fallingForecast[0];
+  } else {
+    // Steady: based on absolute pressure
+    zNum = Math.min(9, Math.max(0, Math.round((32 - pNorm) * 0.3)));
+    forecast = steadyForecast[zNum] || steadyForecast[0];
+  }
+
+  // Confidence based on trend strength and pressure stability
+  let confidence = "Medium";
+  const absChange = Math.abs(tendHpaHr);
+  if (absChange > 2) confidence = "High";
+  else if (absChange < 0.3) confidence = "Low";
+
+  // Detail based on pressure
+  let detail = "";
+  if (slp > 1025) detail = "High pressure system dominant.";
+  else if (slp > 1015) detail = "Normal pressure range.";
+  else if (slp > 1005) detail = "Slightly low pressure.";
+  else detail = "Low pressure system present.";
+
+  return { text: forecast, detail, z: zNum, trend, confidence };
+}
+
+// Mold Risk Index (based on sustained humidity and temperature)
+function moldRisk(tC, rh) {
+  if (!isFinite(tC) || !isFinite(rh)) return { level: "--", risk: 0, tag: "" };
+
+  // Mold grows best at 25-30°C and RH > 70%
+  // Minimal growth below 5°C or above 40°C
+  // Critical threshold is typically 65-70% RH sustained
+
+  let risk = 0;
+
+  // Temperature factor (0-1)
+  let tempFactor = 0;
+  if (tC >= 15 && tC <= 35) {
+    tempFactor = 1 - Math.abs(tC - 25) / 15; // Peak at 25°C
+  } else if (tC >= 5 && tC < 15) {
+    tempFactor = (tC - 5) / 20;
+  } else if (tC > 35 && tC <= 40) {
+    tempFactor = (40 - tC) / 10;
+  }
+
+  // Humidity factor
+  if (rh > 70) {
+    risk = tempFactor * ((rh - 60) / 40) * 100;
+  } else if (rh > 60) {
+    risk = tempFactor * ((rh - 60) / 40) * 50;
+  }
+
+  risk = Math.min(100, Math.max(0, risk));
+
+  let level, tag;
+  if (risk < 20) { level = "Low"; tag = "green"; }
+  else if (risk < 40) { level = "Slight"; tag = "blue"; }
+  else if (risk < 60) { level = "Moderate"; tag = "yellow"; }
+  else if (risk < 80) { level = "High"; tag = "red"; }
+  else { level = "Critical"; tag = "red"; }
+
+  return { level, risk: Math.round(risk), tag };
+}
+
+// Air Density (kg/m³) - useful for aviation, sports performance
+function airDensity(pressureHpa, tempC) {
+  if (!isFinite(pressureHpa) || !isFinite(tempC)) return NaN;
+  // Ideal gas law: ρ = P / (R * T)
+  // R for dry air = 287.05 J/(kg·K)
+  const pressurePa = pressureHpa * 100;
+  const tempK = tempC + 273.15;
+  return pressurePa / (287.05 * tempK);
+}
+
+// Pressure Altitude (feet) - altitude indicated at standard pressure
+function pressureAltitude(pressureHpa) {
+  if (!isFinite(pressureHpa)) return NaN;
+  // Standard atmosphere formula
+  return 145366.45 * (1 - Math.pow(pressureHpa / 1013.25, 0.190284));
+}
+
+// Density Altitude (feet) - pressure altitude corrected for temperature
+function densityAltitude(pressureHpa, tempC) {
+  if (!isFinite(pressureHpa) || !isFinite(tempC)) return NaN;
+  const pa = pressureAltitude(pressureHpa);
+  // Standard temp at sea level = 15°C, lapse rate = 1.98°C per 1000ft
+  const stdTemp = 15 - (pa / 1000) * 1.98;
+  const tempDev = tempC - stdTemp;
+  // Density altitude = PA + (120 * temp deviation)
+  return pa + (120 * tempDev);
+}
+
+// Thom Discomfort Index (simpler than heat index)
+function thomDiscomfort(tC, rh) {
+  if (!isFinite(tC) || !isFinite(rh)) return NaN;
+  // DI = T - (0.55 - 0.0055 * RH) * (T - 14.5)
+  return tC - (0.55 - 0.0055 * rh) * (tC - 14.5);
+}
+
+function thomCategory(di) {
+  if (!isFinite(di)) return "--";
+  if (di < 21) return "No discomfort";
+  if (di < 24) return "Under 50% feel discomfort";
+  if (di < 27) return "Over 50% feel discomfort";
+  if (di < 29) return "Most feel discomfort";
+  if (di < 32) return "Severe stress";
+  return "Dangerous";
+}
+
+// Enthalpy (kJ/kg) - total heat content of air, useful for HVAC
+function enthalpy(tC, rh) {
+  if (!isFinite(tC) || !isFinite(rh)) return NaN;
+  // Saturation vapor pressure (Magnus formula)
+  const es = 6.112 * Math.exp((17.67 * tC) / (tC + 243.5));
+  // Actual vapor pressure
+  const e = (rh / 100) * es;
+  // Humidity ratio (kg water / kg dry air)
+  const W = 0.622 * e / (1013.25 - e);
+  // Enthalpy: h = 1.006*T + W*(2501 + 1.86*T)
+  return 1.006 * tC + W * (2501 + 1.86 * tC);
+}
+
+// Heating Degree Days (base 18°C)
+function heatingDegreeDays(tC, baseTemp = 18) {
+  if (!isFinite(tC)) return 0;
+  return Math.max(0, baseTemp - tC);
+}
+
+// Cooling Degree Days (base 18°C)
+function coolingDegreeDays(tC, baseTemp = 18) {
+  if (!isFinite(tC)) return 0;
+  return Math.max(0, tC - baseTemp);
+}
+
 // Overall comfort assessment
 function overallComfort(tC, rh, dp) {
   if (!isFinite(tC) || !isFinite(rh)) return { level: "--", advice: "" };
@@ -532,13 +769,14 @@ async function tick() {
     const hxDiff = hx - t;
     el('humidex-diff').textContent = isFinite(hxDiff) ? (hxDiff >= 0 ? '+' : '') + hxDiff.toFixed(1) + ' °C' : '--';
 
-    // Weather forecast
-    const fc = weatherForecast(slp, tend, rh);
+    // Zambretti Weather forecast
+    const month = new Date().getMonth() + 1; // 1-12
+    const fc = zambrettiForecast(slp, tend, month);
     el('forecast').textContent = fc.text;
     el('forecast-detail').textContent = fc.detail;
-    el('trend-dir').textContent = tend > 0.5 ? 'Rising' : tend < -0.5 ? 'Falling' : 'Steady';
+    el('trend-dir').textContent = fc.trend ? fc.trend.charAt(0).toUpperCase() + fc.trend.slice(1) : '--';
     el('trend-rate').textContent = isFinite(tend) ? tend.toFixed(2) + ' hPa/hr' : '--';
-    el('press-3hr').textContent = isFinite(slp) ? slp.toFixed(1) + ' hPa' : '--';
+    el('press-slp').textContent = isFinite(slp) ? slp.toFixed(1) + ' hPa' : '--';
     el('forecast-conf').textContent = fc.confidence;
 
     // ASHRAE / PMV
@@ -564,6 +802,69 @@ async function tick() {
     el('sleep-qual').textContent = comfort.sleep;
     el('resp-comfort').textContent = comfort.resp;
     el('comfort-advice').textContent = comfort.advice;
+
+    // Mold Risk
+    const mold = moldRisk(t, rh);
+    el('mold-tag').textContent = mold.level;
+    el('mold-tag').className = 'tag ' + (mold.tag || '');
+    el('mold-fill').style.width = mold.risk + '%';
+    el('mold-score').textContent = mold.risk + ' %';
+    el('mold-rh').textContent = isFinite(rh) ? rh.toFixed(1) + ' %' : '-- %';
+
+    // Air Density
+    const stationPress = j.raw.press_hpa;
+    const density = airDensity(stationPress, t);
+    el('air-density').textContent = isFinite(density) ? density.toFixed(4) : '--';
+    const pa = pressureAltitude(stationPress);
+    el('press-alt').textContent = isFinite(pa) ? Math.round(pa) + ' ft' : '-- ft';
+    const da = densityAltitude(stationPress, t);
+    el('density-alt').textContent = isFinite(da) ? Math.round(da) + ' ft' : '-- ft';
+
+    // Thom Discomfort Index
+    const thom = thomDiscomfort(t, rh);
+    el('thom-idx').textContent = isFinite(thom) ? thom.toFixed(1) : '--';
+    el('thom-cat').textContent = thomCategory(thom);
+    const hi = j.derived.heat_index_c;
+    const thomVsHi = isFinite(thom) && isFinite(hi) ? thom - hi : NaN;
+    el('thom-vs-hi').textContent = isFinite(thomVsHi) ? (thomVsHi >= 0 ? '+' : '') + thomVsHi.toFixed(1) + ' °C' : '--';
+
+    // Enthalpy
+    const enth = enthalpy(t, rh);
+    el('enthalpy').textContent = isFinite(enth) ? enth.toFixed(1) : '--';
+    // HVAC load indicator
+    let hvacLoad = '--';
+    if (isFinite(enth)) {
+      if (enth < 30) hvacLoad = 'Low (heating)';
+      else if (enth < 50) hvacLoad = 'Optimal';
+      else if (enth < 70) hvacLoad = 'Moderate';
+      else hvacLoad = 'High (cooling)';
+    }
+    el('hvac-load').textContent = hvacLoad;
+    // Benchmark (ideal is ~50 kJ/kg at 22°C, 50% RH)
+    let enthBench = '--';
+    if (isFinite(enth)) {
+      if (enth >= 40 && enth <= 60) enthBench = 'Ideal range';
+      else if (enth < 40) enthBench = (40 - enth).toFixed(0) + ' below ideal';
+      else enthBench = (enth - 60).toFixed(0) + ' above ideal';
+    }
+    el('enthalpy-bench').textContent = enthBench;
+
+    // Heating/Cooling Degree Days
+    const hdd = heatingDegreeDays(t, 18);
+    const cdd = coolingDegreeDays(t, 18);
+    el('hdd').textContent = isFinite(hdd) ? hdd.toFixed(1) : '--';
+    el('cdd').textContent = isFinite(cdd) ? cdd.toFixed(1) : '--';
+    // Energy mode
+    let energyMode = '--';
+    if (isFinite(t)) {
+      if (t < 16) energyMode = 'Heating';
+      else if (t > 20) energyMode = 'Cooling';
+      else energyMode = 'Neutral';
+    }
+    el('energy-mode').textContent = energyMode;
+    // Marker position: -10°C = 0%, 18°C = 50%, 35°C = 100%
+    const ddMarkerPos = isFinite(t) ? Math.min(100, Math.max(0, ((t + 10) / 45) * 100)) : 50;
+    el('dd-marker').style.left = ddMarkerPos + '%';
 
   } catch (e) {
     // Fail silently
