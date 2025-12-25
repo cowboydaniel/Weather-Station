@@ -116,7 +116,7 @@ async function tick(){
     draw(j.series || []);
   }catch(e){}
 }
-tick(); setInterval(tick, 1000);
+tick(); setInterval(tick, 3000);  // 3s polling - gas samples every 3s
 </script>
 </body></html>
 )HTML");

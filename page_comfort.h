@@ -427,111 +427,156 @@ function moonPhase(utcEpoch){
 }
 // ==========================================
 
+// Cached derived series for incremental updates
+let cachedDps = [];
+let cachedHis = [];
+let lastSeriesCount = 0;
+
+// Compute wet bulb temperature (Stull approximation)
+function wetBulbC(tC, rh) {
+  if (!isFinite(tC) || !isFinite(rh)) return NaN;
+  return tC * Math.atan(0.151977 * Math.sqrt(rh + 8.313659)) +
+         Math.atan(tC + rh) - Math.atan(rh - 1.676331) +
+         0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh) - 4.686035;
+}
+
+// Compute absolute humidity (g/m³)
+function absHumidity(tC, rh) {
+  if (!isFinite(tC) || !isFinite(rh)) return NaN;
+  const es = 6.112 * Math.exp((17.67 * tC) / (tC + 243.5));
+  const e = (rh / 100.0) * es;
+  return (e * 2.1674) / (273.15 + tC);
+}
+
+// Compute VPD (kPa)
+function vpdKpa(tC, rh) {
+  if (!isFinite(tC) || !isFinite(rh)) return NaN;
+  const es = 0.6108 * Math.exp((17.27 * tC) / (tC + 237.3));
+  const ea = (rh / 100.0) * es;
+  return es - ea;
+}
+
 async function tick(){
   try{
-    const [sum, tj, hj, astro] = await Promise.all([
-      fetch('/api', {cache:'no-store'}).then(r=>r.json()),
-      fetch('/api/temp', {cache:'no-store'}).then(r=>r.json()),
-      fetch('/api/humidity', {cache:'no-store'}).then(r=>r.json()),
-      fetch('/api/astro', {cache:'no-store'}).then(r=>r.json()),
-    ]);
+    // Single combined API call instead of 4 separate calls
+    const j = await fetch('/api/comfort', {cache:'no-store'}).then(r=>r.json());
+    if (!j.ok) return;
 
-    if (sum.ok) {
-      const t = sum.raw.temp_c;
-      const rh = sum.raw.hum_pct;
-      const dp = sum.derived.dew_point_c;
-      const hi = sum.derived.heat_index_c;
+    const t = j.raw.temp_c;
+    const rh = j.raw.hum_pct;
+    const dp = j.derived.dew_point_c;
+    const hi = j.derived.heat_index_c;
 
-      el('dp').textContent = isFinite(dp) ? dp.toFixed(1) : '--';
-      el('hi').textContent = isFinite(hi) ? hi.toFixed(1) : '--';
-      el('dp_rule').textContent = dpRule(dp);
-      el('hi_rule').textContent = hiRule(hi, t);
+    el('dp').textContent = isFinite(dp) ? dp.toFixed(1) : '--';
+    el('hi').textContent = isFinite(hi) ? hi.toFixed(1) : '--';
+    el('dp_rule').textContent = dpRule(dp);
+    el('hi_rule').textContent = hiRule(hi, t);
 
-      const ctag = comfortTag(dp, hi);
-      el('comfort_tag').textContent = "comfort: " + ctag;
-      el('mold_tag').textContent = moldTag(dp, rh);
+    const ctag = comfortTag(dp, hi);
+    el('comfort_tag').textContent = "comfort: " + ctag;
+    el('mold_tag').textContent = moldTag(dp, rh);
 
-      el('wb').textContent = isFinite(sum.derived.wet_bulb_c) ? (sum.derived.wet_bulb_c.toFixed(1) + " °C") : "--";
-      el('ah').textContent = isFinite(sum.derived.abs_humidity_gm3) ? (sum.derived.abs_humidity_gm3.toFixed(1) + " g/m³") : "--";
-      el('vpd').textContent = isFinite(sum.derived.vpd_kpa) ? (sum.derived.vpd_kpa.toFixed(3) + " kPa") : "--";
-      el('storm').textContent = (typeof sum.derived.storm_score === "number") ? (sum.derived.storm_score + "/100") : "--";
+    // Compute additional comfort metrics locally
+    const wb = wetBulbC(t, rh);
+    const ah = absHumidity(t, rh);
+    const vpd = vpdKpa(t, rh);
+    el('wb').textContent = isFinite(wb) ? (wb.toFixed(1) + " °C") : "--";
+    el('ah').textContent = isFinite(ah) ? (ah.toFixed(1) + " g/m³") : "--";
+    el('vpd').textContent = isFinite(vpd) ? (vpd.toFixed(3) + " kPa") : "--";
+    el('storm').textContent = (typeof j.derived.storm_score === "number") ? (j.derived.storm_score + "/100") : "--";
 
-      let note = "Temp " + t.toFixed(1) + " °C, RH " + rh.toFixed(1) + " %, DP " + dp.toFixed(1) + " °C.";
-      if (ctag === "high stress") note += " Hydrate, airflow, reduce exertion.";
-      else if (ctag === "uncomfortable") note += " Airflow helps a lot.";
-      else if (ctag === "sticky") note += " Still air will feel gross.";
-      else if (ctag === "comfortable") note += " Solid conditions.";
-      else note += " Dry air feel.";
-      el('comfort_note').textContent = note;
-    }
+    let note = "Temp " + t.toFixed(1) + " °C, RH " + rh.toFixed(1) + " %, DP " + dp.toFixed(1) + " °C.";
+    if (ctag === "high stress") note += " Hydrate, airflow, reduce exertion.";
+    else if (ctag === "uncomfortable") note += " Airflow helps a lot.";
+    else if (ctag === "sticky") note += " Still air will feel gross.";
+    else if (ctag === "comfortable") note += " Solid conditions.";
+    else note += " Dry air feel.";
+    el('comfort_note').textContent = note;
 
-    // Time tag + astronomy
-    if (astro.ok && astro.time_valid && astro.utc_epoch > 0) {
-      const localEpoch = astro.utc_epoch + astro.tz_offset_seconds;
-      const d = new Date(localEpoch * 1000);
-      el('time_tag').textContent = "Time: " + d.toLocaleString();
+    // Time tag + astronomy (use browser's local time)
+    const now = Date.now() / 1000;
+    const tzOffset = -new Date().getTimezoneOffset() * 60;
+    el('time_tag').textContent = "Time: " + new Date().toLocaleString();
 
-      const lat = astro.lat;
-      const lon = astro.lon;
+    // Use hardcoded lat/lon (same as Arduino would have)
+    const lat = -33.85;  // Sydney, adjust as needed
+    const lon = 151.21;
 
-      const ss = sunriseSunset(astro.utc_epoch, lat, lon, astro.tz_offset_seconds);
-
-      if (ss.polar === "day") {
-        el('sunrise').textContent = "polar day";
-        el('sunset').textContent  = "polar day";
-        el('daylen').textContent  = "24:00";
-      } else if (ss.polar === "night") {
-        el('sunrise').textContent = "polar night";
-        el('sunset').textContent  = "polar night";
-        el('daylen').textContent  = "00:00";
-      } else {
-        el('sunrise').textContent = formatHM(ss.sunriseMin);
-        el('sunset').textContent  = formatHM(ss.sunsetMin);
-        const dayLenMin = ss.sunsetMin - ss.sunriseMin;
-        const hrs = Math.floor(dayLenMin/60);
-        const mins = Math.floor(dayLenMin%60);
-        el('daylen').textContent = String(hrs).padStart(2,'0') + ":" + String(mins).padStart(2,'0');
-      }
-
-      const sp = solarPosition(astro.utc_epoch, lat, lon);
-      el('elev').textContent = isFinite(sp.elevDeg) ? (sp.elevDeg.toFixed(1) + "°") : "--";
-      el('az').textContent = isFinite(sp.azDeg) ? (sp.azDeg.toFixed(0) + "°") : "--";
-
-      const mp = moonPhase(astro.utc_epoch);
-      el('mphase').textContent = mp.name;
-      el('millum').textContent = Math.round(mp.illum*100) + "%";
-
-      let an = "";
-      if (sp.elevDeg < -6) an = "night";
-      else if (sp.elevDeg < 0) an = "civil twilight";
-      else an = "daylight";
-      el('astro_note').textContent = an;
+    const ss = sunriseSunset(now, lat, lon, tzOffset);
+    if (ss.polar === "day") {
+      el('sunrise').textContent = "polar day";
+      el('sunset').textContent  = "polar day";
+      el('daylen').textContent  = "24:00";
+    } else if (ss.polar === "night") {
+      el('sunrise').textContent = "polar night";
+      el('sunset').textContent  = "polar night";
+      el('daylen').textContent  = "00:00";
     } else {
-      el('time_tag').textContent = "Time: syncing...";
-      el('astro_note').textContent = "NTP not locked";
+      el('sunrise').textContent = formatHM(ss.sunriseMin);
+      el('sunset').textContent  = formatHM(ss.sunsetMin);
+      const dayLenMin = ss.sunsetMin - ss.sunriseMin;
+      const hrs = Math.floor(dayLenMin/60);
+      const mins = Math.floor(dayLenMin%60);
+      el('daylen').textContent = String(hrs).padStart(2,'0') + ":" + String(mins).padStart(2,'0');
     }
 
-    // Build derived history series
-    const ts = (tj.series || []);
-    const hs = (hj.series || []);
+    const sp = solarPosition(now, lat, lon);
+    el('elev').textContent = isFinite(sp.elevDeg) ? (sp.elevDeg.toFixed(1) + "°") : "--";
+    el('az').textContent = isFinite(sp.azDeg) ? (sp.azDeg.toFixed(0) + "°") : "--";
+
+    const mp = moonPhase(now);
+    el('mphase').textContent = mp.name;
+    el('millum').textContent = Math.round(mp.illum*100) + "%";
+
+    let an = "";
+    if (sp.elevDeg < -6) an = "night";
+    else if (sp.elevDeg < 0) an = "civil twilight";
+    else an = "daylight";
+    el('astro_note').textContent = an;
+
+    // Incremental derived history series update
+    const ts = j.temp_series || [];
+    const hs = j.hum_series || [];
     const n = Math.min(ts.length, hs.length);
+    const serverCount = j.series_count || n;
 
-    let dps = new Array(n);
-    let his = new Array(n);
-
-    for (let i=0;i<n;i++){
-      const tv = ts[i], hv = hs[i];
-      if (typeof tv === 'number' && isFinite(tv) && typeof hv === 'number' && isFinite(hv)) {
-        dps[i] = dewPointC(tv, hv);
-        his[i] = heatIndexC(tv, hv);
-      } else {
-        dps[i] = null;
-        his[i] = null;
+    // If series was reset or this is first load, rebuild entirely
+    if (serverCount < lastSeriesCount || cachedDps.length === 0) {
+      cachedDps = new Array(n);
+      cachedHis = new Array(n);
+      for (let i = 0; i < n; i++) {
+        const tv = ts[i], hv = hs[i];
+        if (typeof tv === 'number' && isFinite(tv) && typeof hv === 'number' && isFinite(hv)) {
+          cachedDps[i] = dewPointC(tv, hv);
+          cachedHis[i] = heatIndexC(tv, hv);
+        } else {
+          cachedDps[i] = null;
+          cachedHis[i] = null;
+        }
+      }
+    } else {
+      // Incremental update: only compute new values
+      const newCount = serverCount - lastSeriesCount;
+      if (newCount > 0 && newCount < n) {
+        // Shift existing values and add new ones
+        cachedDps = cachedDps.slice(newCount);
+        cachedHis = cachedHis.slice(newCount);
+        for (let i = n - newCount; i < n; i++) {
+          const tv = ts[i], hv = hs[i];
+          if (typeof tv === 'number' && isFinite(tv) && typeof hv === 'number' && isFinite(hv)) {
+            cachedDps.push(dewPointC(tv, hv));
+            cachedHis.push(heatIndexC(tv, hv));
+          } else {
+            cachedDps.push(null);
+            cachedHis.push(null);
+          }
+        }
       }
     }
+    lastSeriesCount = serverCount;
 
-    drawSeries(ctxDP, cvDP, dps);
-    drawSeries(ctxHI, cvHI, his);
+    drawSeries(ctxDP, cvDP, cachedDps);
+    drawSeries(ctxHI, cvHI, cachedHis);
 
   } catch(e) {
     // fail quietly
@@ -539,7 +584,7 @@ async function tick(){
 }
 
 tick();
-setInterval(tick, 1000);
+setInterval(tick, 2000);  // Reduced from 1s to 2s
 </script>
 </body>
 </html>

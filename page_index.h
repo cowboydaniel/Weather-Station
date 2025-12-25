@@ -302,9 +302,10 @@ function sparkline(points, polyId, fillId){
   pf.setAttribute("d", d);
 }
 
+// Use combined dashboard endpoint for efficiency (single request instead of 3)
 async function tick(){
   try{
-    const res = await fetch('/api', { cache:'no-store' });
+    const res = await fetch('/api/dashboard', { cache:'no-store' });
     const j = await res.json();
     if(!j.ok) throw new Error('api_error');
 
@@ -325,20 +326,10 @@ async function tick(){
     el('storm_score').textContent = (typeof j.derived.storm_score === 'number') ? j.derived.storm_score : '--';
     el('storm_badge').textContent = (j.derived.storm || '--') + " (" + (j.derived.storm_score ?? '--') + ")";
 
-    // SLP sparkline + trend point count from /api/pressure
-    try{
-      const pr = await fetch('/api/pressure', {cache:'no-store'});
-      const pj = await pr.json();
-      sparkline(pj.slp_trend_series || [], "slpLine", "slpFill");
-      el('trend_pts').textContent = (pj.slp_trend_series && pj.slp_trend_series.length) ? pj.slp_trend_series.length : '--';
-    }catch(e){}
-
-    // Gas sparkline from /api/gas
-    try{
-      const gr = await fetch('/api/gas', {cache:'no-store'});
-      const gj = await gr.json();
-      sparkline(gj.series || [], "gasLine", "gasFill");
-    }catch(e){}
+    // Sparklines from combined response
+    sparkline(j.slp_trend || [], "slpLine", "slpFill");
+    el('trend_pts').textContent = (j.slp_trend && j.slp_trend.length) ? j.slp_trend.length : '--';
+    sparkline(j.gas_series || [], "gasLine", "gasFill");
 
     el('status').textContent = 'Live';
     el('meta').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -351,7 +342,7 @@ async function tick(){
 }
 
 tick();
-setInterval(tick, 1000);
+setInterval(tick, 2000);  // Reduced from 1s to 2s - data only updates at 1Hz anyway
 </script>
 </body>
 </html>

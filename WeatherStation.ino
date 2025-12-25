@@ -38,6 +38,13 @@ volatile float t_raw = NAN, h_raw = NAN, p_raw_hpa = NAN, g_raw_kohm = NAN;
 uint32_t last_env_ms = 0;
 uint32_t last_gas_ms = 0;
 
+// Cached derived values (updated when sensor values change, not per-request)
+volatile float cached_slp = NAN;
+volatile float cached_dp = NAN;
+volatile float cached_hi = NAN;
+volatile float cached_tend = NAN;
+volatile int cached_storm = -1;
+
 // Simple ring buffer for series
 struct RingF {
   float *buf;
@@ -180,9 +187,48 @@ static const char* stormLabelFromScore(int s) {
   return "very high";
 }
 
-// JSON series writer (chronological order)
+// Buffered JSON series writer (chronological order)
+// Uses chunked writes to reduce WiFiClient overhead
+static char jsonBuf[256];  // Static buffer for building JSON chunks
+static int jsonBufPos = 0;
+
+static void jsonFlush(WiFiClient &c) {
+  if (jsonBufPos > 0) {
+    c.write((const uint8_t*)jsonBuf, jsonBufPos);
+    jsonBufPos = 0;
+  }
+}
+
+static void jsonAppend(WiFiClient &c, const char* s) {
+  int len = strlen(s);
+  while (len > 0) {
+    int space = sizeof(jsonBuf) - jsonBufPos - 1;
+    if (space <= 0) {
+      jsonFlush(c);
+      space = sizeof(jsonBuf) - 1;
+    }
+    int chunk = (len < space) ? len : space;
+    memcpy(jsonBuf + jsonBufPos, s, chunk);
+    jsonBufPos += chunk;
+    s += chunk;
+    len -= chunk;
+  }
+}
+
+static void jsonAppendFloat(WiFiClient &c, float v, int decimals) {
+  char tmp[16];
+  if (!isfinite(v)) {
+    strcpy(tmp, "null");
+  } else {
+    dtostrf(v, 0, decimals, tmp);
+  }
+  jsonAppend(c, tmp);
+}
+
 static void jsonWriteSeries(WiFiClient &c, const RingF &r, int decimals) {
-  c.print("[");
+  jsonBufPos = 0;  // Reset buffer
+  jsonAppend(c, "[");
+
   int count = r.count;
   int start = r.next - count;
   while (start < 0) start += r.size;
@@ -190,11 +236,20 @@ static void jsonWriteSeries(WiFiClient &c, const RingF &r, int decimals) {
   for (int i = 0; i < count; i++) {
     int idx = (start + i) % r.size;
     float v = r.buf[idx];
-    if (!isfinite(v)) c.print("null");
-    else c.print(v, decimals);
-    if (i != count - 1) c.print(",");
+    jsonAppendFloat(c, v, decimals);
+    if (i != count - 1) jsonAppend(c, ",");
   }
-  c.print("]");
+  jsonAppend(c, "]");
+  jsonFlush(c);
+}
+
+// Update cached derived values (called when sensor values change)
+static void updateCachedDerived() {
+  cached_slp = seaLevelPressure_hPa(p_raw_hpa, t_raw, ALTITUDE_M);
+  cached_dp = dewPointC(t_raw, h_raw);
+  cached_hi = heatIndexC(t_raw, h_raw);
+  cached_tend = pressureTendency_hPaPerHour(cached_slp, SLP_TREND_WINDOW_MIN);
+  cached_storm = stormScore(cached_slp, cached_tend, h_raw);
 }
 
 // Sampling scheduler
@@ -211,6 +266,9 @@ static void updateSampling() {
     tempSeries.push(t_raw);
     humSeries.push(h_raw);
     pressSeries.push(p_raw_hpa);
+
+    // Update derived values when environment data changes
+    updateCachedDerived();
   }
 
   if (doGas) {
@@ -221,8 +279,10 @@ static void updateSampling() {
   // 1-minute SLP trend
   if (now - last_slp_trend_ms >= SLP_TREND_SAMPLE_MS) {
     last_slp_trend_ms = now;
-    float slp = seaLevelPressure_hPa(p_raw_hpa, t_raw, ALTITUDE_M);
-    slpTrend.push(slp);
+    slpTrend.push(cached_slp);
+    // Recompute tendency after adding new trend point
+    cached_tend = pressureTendency_hPaPerHour(cached_slp, SLP_TREND_WINDOW_MIN);
+    cached_storm = stormScore(cached_slp, cached_tend, h_raw);
   }
 }
 
@@ -250,9 +310,7 @@ static void sendJSONHumidity(WiFiClient &c) {
 }
 
 static void sendJSONPressure(WiFiClient &c) {
-  float slp_now = seaLevelPressure_hPa(p_raw_hpa, t_raw, ALTITUDE_M);
-  float tend = pressureTendency_hPaPerHour(slp_now, SLP_TREND_WINDOW_MIN);
-
+  // Use cached values instead of recomputing
   c.println("HTTP/1.1 200 OK");
   c.println("Content-Type: application/json; charset=utf-8");
   c.println("Cache-Control: no-store");
@@ -263,11 +321,11 @@ static void sendJSONPressure(WiFiClient &c) {
   c.print("\"unit\":\"hPa\",");
   c.print("\"interval_ms\":"); c.print(ENV_INTERVAL_MS); c.print(",");
   c.print("\"station_series\":"); jsonWriteSeries(c, pressSeries, 2); c.print(",");
-  c.print("\"slp_now\":"); c.print(slp_now, 2); c.print(",");
+  c.print("\"slp_now\":"); c.print(cached_slp, 2); c.print(",");
   c.print("\"slp_trend_interval_ms\":"); c.print(SLP_TREND_SAMPLE_MS); c.print(",");
   c.print("\"slp_trend_series\":"); jsonWriteSeries(c, slpTrend, 2); c.print(",");
-  c.print("\"tendency_hpa_hr\":"); c.print(tend, 2); c.print(",");
-  c.print("\"tendency\":\""); c.print(tendencyLabel(tend)); c.print("\"");
+  c.print("\"tendency_hpa_hr\":"); c.print(cached_tend, 2); c.print(",");
+  c.print("\"tendency\":\""); c.print(tendencyLabel(cached_tend)); c.print("\"");
   c.println("}");
 }
 
@@ -283,12 +341,7 @@ static void sendJSONGas(WiFiClient &c) {
 }
 
 static void sendJSONSummary(WiFiClient &c) {
-  float slp_now = seaLevelPressure_hPa(p_raw_hpa, t_raw, ALTITUDE_M);
-  float dp = dewPointC(t_raw, h_raw);
-  float hi = heatIndexC(t_raw, h_raw);
-  float tend = pressureTendency_hPaPerHour(slp_now, SLP_TREND_WINDOW_MIN);
-  int storm = stormScore(slp_now, tend, h_raw);
-
+  // Use cached derived values instead of recomputing
   c.println("HTTP/1.1 200 OK");
   c.println("Content-Type: application/json; charset=utf-8");
   c.println("Cache-Control: no-store");
@@ -304,15 +357,77 @@ static void sendJSONSummary(WiFiClient &c) {
   c.print("},");
   c.print("\"derived\":{");
   c.print("\"altitude_m\":"); c.print(ALTITUDE_M,0); c.print(",");
-  c.print("\"slp_hpa\":"); c.print(slp_now,2); c.print(",");
-  c.print("\"dew_point_c\":"); c.print(dp,2); c.print(",");
-  c.print("\"heat_index_c\":"); c.print(hi,2); c.print(",");
-  c.print("\"press_tendency_hpa_hr\":"); c.print(tend,2); c.print(",");
-  c.print("\"press_tendency\":\""); c.print(tendencyLabel(tend)); c.print("\",");
-  c.print("\"storm_score\":"); c.print(storm); c.print(",");
-  c.print("\"storm\":\""); c.print(stormLabelFromScore(storm)); c.print("\"");
+  c.print("\"slp_hpa\":"); c.print(cached_slp,2); c.print(",");
+  c.print("\"dew_point_c\":"); c.print(cached_dp,2); c.print(",");
+  c.print("\"heat_index_c\":"); c.print(cached_hi,2); c.print(",");
+  c.print("\"press_tendency_hpa_hr\":"); c.print(cached_tend,2); c.print(",");
+  c.print("\"press_tendency\":\""); c.print(tendencyLabel(cached_tend)); c.print("\",");
+  c.print("\"storm_score\":"); c.print(cached_storm); c.print(",");
+  c.print("\"storm\":\""); c.print(stormLabelFromScore(cached_storm)); c.print("\"");
   c.print("}}");
   c.println();
+}
+
+// Combined dashboard endpoint - returns summary + sparkline data in one request
+static void sendJSONDashboard(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  c.print("{\"ok\":true,");
+  // Raw values
+  c.print("\"raw\":{");
+  c.print("\"temp_c\":"); c.print(t_raw,2); c.print(",");
+  c.print("\"hum_pct\":"); c.print(h_raw,2); c.print(",");
+  c.print("\"press_hpa\":"); c.print(p_raw_hpa,2); c.print(",");
+  c.print("\"gas_kohm\":"); c.print(g_raw_kohm,2);
+  c.print("},");
+  // Derived values
+  c.print("\"derived\":{");
+  c.print("\"altitude_m\":"); c.print(ALTITUDE_M,0); c.print(",");
+  c.print("\"slp_hpa\":"); c.print(cached_slp,2); c.print(",");
+  c.print("\"dew_point_c\":"); c.print(cached_dp,2); c.print(",");
+  c.print("\"heat_index_c\":"); c.print(cached_hi,2); c.print(",");
+  c.print("\"press_tendency_hpa_hr\":"); c.print(cached_tend,2); c.print(",");
+  c.print("\"press_tendency\":\""); c.print(tendencyLabel(cached_tend)); c.print("\",");
+  c.print("\"storm_score\":"); c.print(cached_storm); c.print(",");
+  c.print("\"storm\":\""); c.print(stormLabelFromScore(cached_storm)); c.print("\"");
+  c.print("},");
+  // Sparkline data for SLP trend
+  c.print("\"slp_trend\":"); jsonWriteSeries(c, slpTrend, 2); c.print(",");
+  // Sparkline data for gas
+  c.print("\"gas_series\":"); jsonWriteSeries(c, gasSeries, 2);
+  c.println("}");
+}
+
+// Combined comfort endpoint - returns summary + temp/humidity series for comfort page
+static void sendJSONComfort(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  c.print("{\"ok\":true,");
+  // Raw values
+  c.print("\"raw\":{");
+  c.print("\"temp_c\":"); c.print(t_raw,2); c.print(",");
+  c.print("\"hum_pct\":"); c.print(h_raw,2);
+  c.print("},");
+  // Derived values
+  c.print("\"derived\":{");
+  c.print("\"dew_point_c\":"); c.print(cached_dp,2); c.print(",");
+  c.print("\"heat_index_c\":"); c.print(cached_hi,2); c.print(",");
+  c.print("\"storm_score\":"); c.print(cached_storm);
+  c.print("},");
+  // Series for computing derived history
+  c.print("\"temp_series\":"); jsonWriteSeries(c, tempSeries, 2); c.print(",");
+  c.print("\"hum_series\":"); jsonWriteSeries(c, humSeries, 2); c.print(",");
+  // Series count for incremental updates
+  c.print("\"series_count\":"); c.print(tempSeries.count);
+  c.println("}");
 }
 
 // Basic 404
@@ -413,6 +528,10 @@ void loop() {
     sendPageIndex(client);
 
   // Routing (API)
+  } else if (reqLine.startsWith("GET /api/dashboard")) {
+    sendJSONDashboard(client);
+  } else if (reqLine.startsWith("GET /api/comfort")) {
+    sendJSONComfort(client);
   } else if (reqLine.startsWith("GET /api/temp")) {
     sendJSONTemp(client);
   } else if (reqLine.startsWith("GET /api/humidity")) {
