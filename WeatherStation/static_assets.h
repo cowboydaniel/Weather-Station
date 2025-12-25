@@ -165,7 +165,7 @@ a.back, .pill{
 .kpi b{color:var(--text)}
 .kpi-grid{
   display:grid;
-  grid-template-columns:repeat(4,1fr);
+  grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
   gap:10px;
 }
 .kpi-grid > div{
