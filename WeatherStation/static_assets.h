@@ -478,6 +478,29 @@ static const char APP_JS[] =
 R"JS(
 const $ = (id) => document.getElementById(id);
 
+// Shared settings helpers (matches Settings page defaults)
+const SETTINGS_DEFAULTS = {
+  theme: 'dark',
+  altitude: 242,
+  latitude: -33.85,
+  longitude: 151.21,
+  refreshRate: 2000,
+  graphSpan: 600,
+  showGrid: true,
+  tempUnit: 'C',
+  pressureUnit: 'hPa'
+};
+
+function loadUserSettings(){
+  try{
+    const raw = localStorage.getItem('weatherSettings');
+    if (!raw) return SETTINGS_DEFAULTS;
+    return { ...SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+  }catch(e){
+    return SETTINGS_DEFAULTS;
+  }
+}
+
 function setupCanvas(id, heightPx){
   const cv = $(id);
   const ctx = cv.getContext('2d');
@@ -514,11 +537,13 @@ function drawLineSeries(ctx, cv, series, opts={}){
   const w = cv.width, h = cv.height;
   ctx.clearRect(0,0,w,h);
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-  ctx.lineWidth = 1;
-  for(let i=1;i<6;i++){
-    const y = (h*i)/6;
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+  if (opts.showGrid !== false){
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for(let i=1;i<6;i++){
+      const y = (h*i)/6;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    }
   }
 
   ctx.lineWidth = 3;
@@ -541,6 +566,29 @@ function drawLineSeries(ctx, cv, series, opts={}){
   return {min: dataMin, max: dataMax, last: data[data.length-1]};
 }
 
+function sliceForSpan(series, intervalMs, spanSec){
+  if (!Array.isArray(series) || !intervalMs) return [];
+  const samplesWanted = Math.max(2, Math.ceil((spanSec * 1000) / intervalMs));
+  return series.slice(-samplesWanted);
+}
+
+function pickSeriesBySpan(res, spanSec){
+  const fastInterval = res.interval_ms;
+  const slowInterval = res.min_interval_ms || res.station_min_interval_ms;
+  const fastSeries = res.series || res.station_series;
+  const slowSeries = res.series_min || res.station_series_min;
+
+  const fastWindowSec = (fastSeries?.length || 0) * (fastInterval || 0) / 1000;
+  const canUseSlow = Array.isArray(slowSeries) && slowInterval;
+
+  const useSlow = canUseSlow && spanSec > fastWindowSec;
+  const series = useSlow
+    ? sliceForSpan(slowSeries, slowInterval, spanSec)
+    : sliceForSpan(fastSeries, fastInterval, spanSec);
+
+  return { series, intervalMs: useSlow ? slowInterval : fastInterval };
+}
+
 function startSimpleSeriesPage(cfg){
   const nowEl = cfg.nowId ? $(cfg.nowId) : null;
   const minEl = cfg.minId ? $(cfg.minId) : null;
@@ -548,13 +596,17 @@ function startSimpleSeriesPage(cfg){
   const decimals = cfg.decimals ?? 1;
   const unit = cfg.unit || '';
   const chart = setupCanvas(cfg.canvasId, cfg.height || 360);
+  const settings = loadUserSettings();
+  const spanSec = Math.max(60, settings.graphSpan || 600);
+  const showGrid = settings.showGrid !== false;
 
   const render = (series) => {
     const stats = drawLineSeries(chart.ctx, chart.cv, series, {
       fixedMin: cfg.fixedMin,
       fixedMax: cfg.fixedMax,
       padFraction: cfg.padFraction,
-      minPad: cfg.minPad
+      minPad: cfg.minPad,
+      showGrid
     });
     if (!stats) return;
     if (nowEl) nowEl.textContent = stats.last.toFixed(decimals) + unit;
@@ -567,11 +619,13 @@ function startSimpleSeriesPage(cfg){
       const r = await fetch(cfg.endpoint, {cache:'no-store'});
       const j = await r.json();
       if(!j.ok) return;
-      render(j.series || []);
+      const picked = pickSeriesBySpan(j, spanSec);
+      render(picked.series || []);
     }catch(e){}
   };
   tick();
-  setInterval(tick, cfg.pollMs || 2000);
+  const pollMs = cfg.pollMs || settings.refreshRate || 2000;
+  setInterval(tick, pollMs);
   return {tick, render, chart};
 }
 
