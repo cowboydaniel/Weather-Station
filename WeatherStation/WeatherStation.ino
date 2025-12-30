@@ -711,7 +711,7 @@ static void send404(WiFiClient &c) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {}
+  delay(100);
 
   Serial.println("Connecting to WiFi...");
   while (WiFi.begin(ssid, pass) != WL_CONNECTED) delay(1000);
