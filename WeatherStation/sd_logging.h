@@ -1,13 +1,17 @@
 #ifndef SD_LOGGING_H
 #define SD_LOGGING_H
 
-#include <SD.h>
+#include <SdFat.h>
 
-// SD card CS pin (different from WiFi's pin 10)
+// SD card configuration using SdFat with DEDICATED_SPI
+// CS pin 7 (WiFi uses pin 10, so no conflict)
 const uint8_t SD_CS_PIN = 7;
+const uint32_t SPI_CLOCK = 25000000;  // 25 MHz - proven stable on UNO R4
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SPI_CLOCK)
 
-// SD card file object
-File logFile;
+// SD card object
+SdFat32 sd;
+File32 logFile;
 
 // SD card status
 struct SDInfo {
@@ -23,9 +27,9 @@ SDInfo sd_info;
 
 // ============ SD INITIALIZATION ============
 bool initSDCard() {
-  Serial.println("Initializing SD card on pin 7...");
+  Serial.println("Initializing SD card on pin 7 with SdFat...");
 
-  if (!SD.begin(SD_CS_PIN)) {
+  if (!sd.begin(SD_CONFIG)) {
     strcpy(sd_info.error_msg, "SD init failed");
     Serial.println("SD card initialization failed!");
     sd_info.initialized = false;
@@ -34,10 +38,13 @@ bool initSDCard() {
 
   sd_info.initialized = true;
 
-  // Get free space estimate (rough calculation)
-  // Note: SD.h doesn't provide easy access to card size, so we estimate based on typical usage
-  sd_info.total_bytes = 16LL * 1024 * 1024 * 1024;  // Assume 16GB card
-  sd_info.free_bytes = sd_info.total_bytes;  // Start with full capacity
+  // Get card info
+  sd_info.total_bytes = (uint32_t)sd.card()->cardSize() * 512;
+
+  // Calculate free space
+  uint32_t freeClusters = sd.vol()->freeClusterCount();
+  uint32_t clusterSize = sd.vol()->sectorsPerCluster() * 512;
+  sd_info.free_bytes = freeClusters * clusterSize;
 
   Serial.print("SD card initialized. Total: ");
   Serial.print(sd_info.total_bytes / (1024*1024));
@@ -60,15 +67,14 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
   }
 
   // Check if file exists
-  if (!SD.exists("data.csv")) {
+  if (!sd.exists("data.csv")) {
     Serial.println("No existing data.csv found, starting fresh");
     sd_info.logged_samples = 0;
     return true;
   }
 
   // Open existing file for reading
-  logFile = SD.open("data.csv", FILE_READ);
-  if (!logFile) {
+  if (!logFile.open("data.csv", O_RDONLY)) {
     strcpy(sd_info.error_msg, "Cannot open data.csv");
     Serial.println("Failed to open data.csv");
     return false;
@@ -137,14 +143,10 @@ bool logSensorReading(unsigned long timestamp_ms, float temp_c, float hum_pct,
   }
 
   // Open file in append mode
-  logFile = SD.open("data.csv", FILE_WRITE);
-  if (!logFile) {
+  if (!logFile.open("data.csv", O_WRONLY | O_CREAT | O_APPEND)) {
     strcpy(sd_info.error_msg, "Cannot open data.csv");
     return false;
   }
-
-  // Move to end of file for append
-  logFile.seek(logFile.size());
 
   // Format: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
   char buffer[128];
