@@ -243,6 +243,39 @@ static void sendPageStats(WiFiClient &client) {
         <span class="stat-value" id="avg-response">--</span>
       </div>
     </div>
+
+    <div class="card wide">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 7v10"/><path d="M8 11h8"/></svg>
+        SD Card Storage
+      </div>
+
+      <div class="stat-row">
+        <span class="stat-label">Status</span>
+        <span class="stat-value"><span class="status-dot green" id="sd-status-dot"></span><span id="sd-status">--</span></span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Total Capacity</span>
+        <span class="stat-value" id="sd-total">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Free Space</span>
+        <span class="stat-value" id="sd-free">--</span>
+      </div>
+      <div class="stat-row" style="flex-direction:column; align-items:stretch;">
+        <div style="display:flex; justify-content:space-between;">
+          <span class="stat-label">Storage Usage</span>
+          <span class="stat-value" id="sd-usage-pct">--%</span>
+        </div>
+        <div class="bar-container">
+          <div class="bar-fill green" id="sd-usage-bar" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Logged Samples</span>
+        <span class="stat-value" id="sd-samples">--</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -341,6 +374,33 @@ async function fetchStats() {
     el('page-requests').textContent = data.requests.pages;
     el('error-requests').textContent = data.requests.errors;
     el('avg-response').textContent = data.requests.avg_ms.toFixed(1) + ' ms';
+
+    // SD Card stats
+    if (data.sd_card) {
+      const sdInit = data.sd_card.initialized;
+      el('sd-status').textContent = sdInit ? 'Ready' : 'Not initialized';
+      el('sd-status-dot').className = 'status-dot ' + (sdInit ? 'green' : 'red');
+
+      if (sdInit) {
+        const totalMB = data.sd_card.total_mb;
+        const freeMB = data.sd_card.free_mb;
+        const usedMB = totalMB - freeMB;
+        const usagePct = Math.round((usedMB / totalMB) * 100);
+
+        el('sd-total').textContent = totalMB + ' MB';
+        el('sd-free').textContent = freeMB + ' MB';
+        el('sd-usage-pct').textContent = usagePct + '%';
+        el('sd-usage-bar').style.width = usagePct + '%';
+        el('sd-usage-bar').className = 'bar-fill ' + getBarColor(100 - usagePct);
+        el('sd-samples').textContent = data.sd_card.logged_samples.toLocaleString();
+      } else {
+        el('sd-total').textContent = '--';
+        el('sd-free').textContent = '--';
+        el('sd-usage-pct').textContent = '--%';
+        el('sd-usage-bar').style.width = '0%';
+        el('sd-samples').textContent = '--';
+      }
+    }
 
   } catch (e) {
     el('net-status').textContent = 'Error';
