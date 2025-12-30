@@ -2,16 +2,14 @@
 #define SD_LOGGING_H
 
 #include <SdFat.h>
+#include <SPI.h>
 
-// Software SPI pins (avoid conflicts with WiFi's hardware SPI)
-// Hardware SPI (WiFi uses): 10, 11, 12, 13
-// Our software SPI pins:
-const uint8_t SD_SOFT_MOSI = 8;
-const uint8_t SD_SOFT_MISO = 9;
-const uint8_t SD_SOFT_SCK = 6;
-const uint8_t SD_SOFT_CS = 7;
+// SD card CS pin (different from WiFi's pin 10, shares hardware SPI bus)
+// Hardware SPI pins (shared): 11 (MOSI), 12 (MISO), 13 (SCK)
+// CS pins (separate): WiFi uses 10, SD card uses 7
+const uint8_t SD_CS_PIN = 7;
 
-// SD card object using software SPI configuration
+// SD card object using shared hardware SPI
 SdFat32 sd;
 File32 logFile;
 
@@ -29,11 +27,11 @@ SDInfo sd_info;
 
 // ============ SD INITIALIZATION ============
 bool initSDCard() {
-  Serial.println("Initializing SD card with software SPI...");
+  Serial.println("Initializing SD card on shared SPI bus...");
 
-  // Configure software SPI with custom pins
-  SdSpiConfig spiConfig(SD_SOFT_CS, SHARED_SPI, SD_SCK_MHZ(10),
-                        SD_SOFT_MOSI, SD_SOFT_MISO, SD_SOFT_SCK);
+  // Use hardware SPI with pin 7 as CS (WiFi uses pin 10)
+  // Both devices share the SPI bus but with separate CS pins
+  SdSpiConfig spiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(10));
 
   if (!sd.begin(spiConfig)) {
     strcpy(sd_info.error_msg, "SD init failed");
@@ -59,6 +57,9 @@ bool initSDCard() {
 
   return true;
 }
+
+// Forward declaration - RingF is defined in main sketch
+struct RingF;
 
 // ============ LOAD HISTORY FROM CSV ============
 bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
