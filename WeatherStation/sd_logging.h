@@ -63,8 +63,13 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
                        RingF &gasSeries, RingF &slpTrend);
 
 // ============ LOG READING TO CSV ============
-bool logSensorReading(unsigned long timestamp_ms, float temp_c, float hum_pct,
-                      float press_hpa, float gas_kohm) {
+// All possible sensor data for complete historical logging
+bool logSensorReading(unsigned long timestamp_ms,
+                      float temp_c, float hum_pct,
+                      float press_station_hpa, float press_sealevel_hpa,
+                      float dew_point_c, float heat_index_c,
+                      float pressure_tendency_hpa_per_3h,
+                      float storm_score, float gas_kohm) {
   if (!sd_info.initialized) {
     return false;
   }
@@ -75,10 +80,15 @@ bool logSensorReading(unsigned long timestamp_ms, float temp_c, float hum_pct,
     return false;
   }
 
-  // Format: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
-  char buffer[128];
-  snprintf(buffer, sizeof(buffer), "%lu,%.2f,%.2f,%.2f,%.2f\n",
-           timestamp_ms, temp_c, hum_pct, press_hpa, gas_kohm);
+  // Format: timestamp_ms,temp_c,humidity_pct,pressure_station_hpa,pressure_sealevel_hpa,
+  //         dew_point_c,heat_index_c,pressure_tendency_hpa_per_3h,storm_score,gas_kohm
+  char buffer[256];
+  snprintf(buffer, sizeof(buffer),
+           "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+           timestamp_ms, temp_c, hum_pct,
+           press_station_hpa, press_sealevel_hpa,
+           dew_point_c, heat_index_c,
+           pressure_tendency_hpa_per_3h, storm_score, gas_kohm);
 
   logFile.print(buffer);
   logFile.sync();   // Flush to SD card immediately

@@ -287,13 +287,15 @@ static void updateSampling() {
     humSeries.push(h_raw);
     pressSeries.push(p_raw_hpa);
 
-    // Log to SD card (even if WiFi is disconnected)
-    if (sd_info.initialized) {
-      logSensorReading(now, t_raw, h_raw, p_raw_hpa, g_raw_kohm);
-    }
-
     // Update derived values when environment data changes
     updateCachedDerived();
+
+    // Log to SD card (even if WiFi is disconnected)
+    // Now we have all the calculated values available
+    if (sd_info.initialized) {
+      logSensorReading(now, t_raw, h_raw, p_raw_hpa, cached_slp,
+                       cached_dp, cached_hi, cached_tend, cached_storm, g_raw_kohm);
+    }
   }
 
   if (doGas) {
@@ -663,10 +665,13 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
         }
 
-        // Parse CSV using manual field extraction (more robust than sscanf)
-        // Format: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
+        // Parse CSV using manual field extraction (handles both old and new formats)
+        // New Format (10 fields): timestamp_ms,temp_c,humidity_pct,pressure_station_hpa,pressure_sealevel_hpa,
+        //                         dew_point_c,heat_index_c,pressure_tendency_hpa_per_3h,storm_score,gas_kohm
+        // Old Format (5 fields): timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
         unsigned long ts = 0;
-        float temp = NAN, hum = NAN, press = NAN, gas = NAN;
+        float temp = NAN, hum = NAN, press_station = NAN, press_slp = NAN;
+        float dp = NAN, hi = NAN, tend = NAN, storm = NAN, gas = NAN;
 
         // Find commas and extract fields
         int field = 0;
@@ -683,21 +688,22 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
               field_str[len] = '\0';
 
               // Parse field based on its position
-              if (field == 0) {
-                ts = strtoul(field_str, NULL, 10);
-                parsed++;
-              } else if (field == 1) {
-                temp = strtof(field_str, NULL);
-                parsed++;
-              } else if (field == 2) {
-                hum = strtof(field_str, NULL);
-                parsed++;
-              } else if (field == 3) {
-                press = strtof(field_str, NULL);
-                parsed++;
-              } else if (field == 4) {
-                gas = strtof(field_str, NULL);
-                parsed++;
+              switch(field) {
+                case 0: ts = strtoul(field_str, NULL, 10); parsed++; break;
+                case 1: temp = strtof(field_str, NULL); parsed++; break;
+                case 2: hum = strtof(field_str, NULL); parsed++; break;
+                case 3: press_station = strtof(field_str, NULL); parsed++; break;
+                case 4:
+                  // Field 4 could be either gas_kohm (old 5-field format) or pressure_sealevel_hpa (new 10-field)
+                  // We'll treat it as pressure_sealevel_hpa and set gas later if only 5 fields
+                  press_slp = strtof(field_str, NULL);
+                  parsed++;
+                  break;
+                case 5: dp = strtof(field_str, NULL); parsed++; break;
+                case 6: hi = strtof(field_str, NULL); parsed++; break;
+                case 7: tend = strtof(field_str, NULL); parsed++; break;
+                case 8: storm = strtof(field_str, NULL); parsed++; break;
+                case 9: gas = strtof(field_str, NULL); parsed++; break;
               }
             }
             field++;
@@ -705,14 +711,25 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
         }
 
-        if (parsed >= 4 && isfinite(temp) && isfinite(hum) && isfinite(press)) {
+        // For backwards compatibility: if only 5 fields, field[4] was gas, not SLP
+        if (field == 5) {
+          gas = press_slp;  // Field 4 was actually gas
+          press_slp = press_station;  // No SLP data, use station pressure as fallback
+        }
+
+        if (parsed >= 4 && isfinite(temp) && isfinite(hum) && isfinite(press_station)) {
           // Push to ring buffers (they auto-wrap when full)
           tempSeries.push(temp);
           humSeries.push(hum);
-          pressSeries.push(press);
+          pressSeries.push(press_station);
 
           if (isfinite(gas)) {
             gasSeries.push(gas);
+          }
+
+          // Push SLP trend if available (new format only)
+          if (field >= 5 && isfinite(press_slp)) {
+            slpTrend.push(press_slp);
           }
 
           sample_count++;
@@ -722,7 +739,7 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           Serial.print(parsed);
           Serial.print(" fields, ");
           Serial.print(field);
-          Serial.print(" commas): ");
+          Serial.print(" total): ");
           Serial.println(line);
           skipped_lines++;
         }
