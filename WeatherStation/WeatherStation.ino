@@ -663,13 +663,49 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
         }
 
-        // Parse CSV: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
+        // Parse CSV using manual field extraction (more robust than sscanf)
+        // Format: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
         unsigned long ts = 0;
         float temp = NAN, hum = NAN, press = NAN, gas = NAN;
 
-        int parsed = sscanf(line, "%lu,%f,%f,%f,%f", &ts, &temp, &hum, &press, &gas);
+        // Find commas and extract fields
+        int field = 0;
+        int start = 0;
+        char field_str[32];
+        int parsed = 0;
 
-        if (parsed == 5 && isfinite(temp) && isfinite(hum) && isfinite(press)) {
+        for (int i = 0; i <= line_len; i++) {
+          if (line[i] == ',' || line[i] == '\0') {
+            // Extract field
+            int len = i - start;
+            if (len > 0 && len < (int)sizeof(field_str)) {
+              strncpy(field_str, &line[start], len);
+              field_str[len] = '\0';
+
+              // Parse field based on its position
+              if (field == 0) {
+                ts = strtoul(field_str, NULL, 10);
+                parsed++;
+              } else if (field == 1) {
+                temp = strtof(field_str, NULL);
+                parsed++;
+              } else if (field == 2) {
+                hum = strtof(field_str, NULL);
+                parsed++;
+              } else if (field == 3) {
+                press = strtof(field_str, NULL);
+                parsed++;
+              } else if (field == 4) {
+                gas = strtof(field_str, NULL);
+                parsed++;
+              }
+            }
+            field++;
+            start = i + 1;
+          }
+        }
+
+        if (parsed >= 4 && isfinite(temp) && isfinite(hum) && isfinite(press)) {
           // Push to ring buffers (they auto-wrap when full)
           tempSeries.push(temp);
           humSeries.push(hum);
@@ -680,11 +716,13 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
 
           sample_count++;
-        } else if (parsed != 5) {
+        } else if (parsed < 4) {
           // Debug: log lines that failed to parse
           Serial.print("Parse failed (got ");
           Serial.print(parsed);
-          Serial.print(" fields): ");
+          Serial.print(" fields, ");
+          Serial.print(field);
+          Serial.print(" commas): ");
           Serial.println(line);
           skipped_lines++;
         }
