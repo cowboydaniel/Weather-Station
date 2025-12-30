@@ -4,6 +4,9 @@
 #include <Adafruit_BME680.h>
 #include <math.h>
 
+// SD card logging with software SPI
+#include "sd_logging.h"
+
 // Pages (HTML lives in these headers)
 #include "page_index.h"
 #include "page_temp.h"
@@ -281,6 +284,11 @@ static void updateSampling() {
     humSeries.push(h_raw);
     pressSeries.push(p_raw_hpa);
 
+    // Log to SD card (even if WiFi is disconnected)
+    if (sd_info.initialized) {
+      logSensorReading(now, t_raw, h_raw, p_raw_hpa, g_raw_kohm);
+    }
+
     // Update derived values when environment data changes
     updateCachedDerived();
   }
@@ -548,6 +556,17 @@ static void sendJSONStats(WiFiClient &c) {
   c.print("\"pages\":"); c.print(req_pages); c.print(",");
   c.print("\"errors\":"); c.print(req_errors); c.print(",");
   c.print("\"avg_ms\":"); c.print(avgMs, 1);
+  c.print("},");
+
+  // SD Card section
+  c.print("\"sd_card\":{");
+  c.print("\"initialized\":"); c.print(sd_info.initialized ? "true" : "false"); c.print(",");
+  c.print("\"total_mb\":"); c.print(getSDTotalSpaceMB()); c.print(",");
+  c.print("\"free_mb\":"); c.print(getSDFreeSpaceMB()); c.print(",");
+  c.print("\"logged_samples\":"); c.print(getSDSampleCount());
+  if (sd_info.error_msg[0] != '\0') {
+    c.print(",\"error\":\""); c.print(sd_info.error_msg); c.print("\"");
+  }
   c.print("}");
 
   c.println("}");
@@ -613,6 +632,15 @@ void setup() {
     }
   }
   configureBME();
+
+  // Initialize SD card (software SPI - no WiFi conflicts)
+  Serial.println("Initializing SD card...");
+  if (initSDCard()) {
+    // Load historical data from CSV into ring buffers
+    loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
+  } else {
+    Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
+  }
 
   last_env_ms = millis() - ENV_INTERVAL_MS;
   last_gas_ms = millis() - GAS_INTERVAL_MS;
