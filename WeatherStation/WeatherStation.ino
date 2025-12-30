@@ -609,6 +609,83 @@ static void send404(WiFiClient &c) {
   c.println("404");
 }
 
+// ============ LOAD HISTORY FROM CSV (implementation) ============
+bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
+                       RingF &gasSeries, RingF &slpTrend) {
+  if (!sd_info.initialized) {
+    Serial.println("SD card not initialized");
+    return false;
+  }
+
+  // Check if file exists
+  if (!sd.exists("data.csv")) {
+    Serial.println("No existing data.csv found, starting fresh");
+    sd_info.logged_samples = 0;
+    return true;
+  }
+
+  // Open existing file for reading
+  if (!logFile.open("data.csv", O_RDONLY)) {
+    strcpy(sd_info.error_msg, "Cannot open data.csv");
+    Serial.println("Failed to open data.csv");
+    return false;
+  }
+
+  Serial.println("Loading historical data from CSV...");
+
+  uint32_t sample_count = 0;
+  char line[128];
+  int line_len = 0;
+
+  // Read and parse each line
+  while (logFile.available()) {
+    int c = logFile.read();
+
+    if (c == '\n' || c == -1) {
+      if (line_len > 0) {
+        line[line_len] = '\0';
+
+        // Parse CSV: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
+        unsigned long ts = 0;
+        float temp = NAN, hum = NAN, press = NAN, gas = NAN;
+
+        int parsed = sscanf(line, "%lu,%f,%f,%f,%f", &ts, &temp, &hum, &press, &gas);
+
+        if (parsed == 5 && isfinite(temp) && isfinite(hum) && isfinite(press)) {
+          // Push to ring buffers (they auto-wrap when full)
+          tempSeries.push(temp);
+          humSeries.push(hum);
+          pressSeries.push(press);
+
+          if (isfinite(gas)) {
+            gasSeries.push(gas);
+          }
+
+          sample_count++;
+        }
+      }
+
+      line_len = 0;
+      if (c == -1) break;
+    } else if (c >= 32 && c < 127) {  // Printable ASCII
+      if (line_len < sizeof(line) - 1) {
+        line[line_len++] = c;
+      }
+    }
+  }
+
+  logFile.close();
+
+  sd_info.logged_samples = sample_count;
+  sd_info.file_size = logFile.size();
+
+  Serial.print("Loaded ");
+  Serial.print(sample_count);
+  Serial.println(" samples from SD card");
+
+  return true;
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
