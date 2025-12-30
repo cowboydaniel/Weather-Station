@@ -81,7 +81,8 @@ bool logSensorReading(unsigned long timestamp_ms, float temp_c, float hum_pct,
            timestamp_ms, temp_c, hum_pct, press_hpa, gas_kohm);
 
   logFile.print(buffer);
-  logFile.close();
+  logFile.sync();   // Flush to SD card immediately
+  logFile.close();  // Close file
 
   sd_info.logged_samples++;
 
