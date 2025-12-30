@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h>
+#include <SdFat.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -21,11 +22,16 @@
 const char ssid[] = "outback_hut";
 const char pass[] = "wildmonkeys2810";
 const float ALTITUDE_M = 242.0f;
+const uint8_t SD_CS_PIN = 10;           // Chip select pin for the SD breakout/module (change if wired differently)
+const char LOG_PATH[] = "weather_log.csv"; // CSV log written with SdFat
 // ===============================================
 
 WiFiServer server(80);
 Adafruit_BME680 bme;
 uint8_t BME_ADDR = 0x76;
+SdFat sd;
+File logFile;
+bool sd_ready = false;
 
 // Sampling intervals
 const uint32_t ENV_INTERVAL_MS = 1000;  // temp/hum/pressure
@@ -136,6 +142,26 @@ static void configureBME() {
   bme.setPressureOversampling(BME680_OS_4X);
   bme.setIIRFilterSize(BME680_FILTER_SIZE_7);
   bme.setGasHeater(320, 150);
+}
+
+static void initSDCard() {
+  if (sd_ready) return;
+  Serial.print("Mounting SD...");
+  if (!sd.begin(SD_CS_PIN, SD_SCK_MHZ(10))) {
+    Serial.println(" failed");
+    return;
+  }
+
+  sd_ready = true;
+  Serial.println(" ok");
+
+  if (!sd.exists(LOG_PATH)) {
+    logFile = sd.open(LOG_PATH, FILE_WRITE);
+    if (logFile) {
+      logFile.println("timestamp_ms,temp_c,hum_pct,press_hpa,gas_kohm,slp_hpa");
+      logFile.close();
+    }
+  }
 }
 
 static bool sampleBME(bool wantGas) {
@@ -342,6 +368,25 @@ static void updateSampling() {
     tempSeries.push(t_raw);
     humSeries.push(h_raw);
     pressSeries.push(p_raw_hpa);
+
+    // Log to SD (CSV) whenever we log a new environmental sample
+    if (sd_ready) {
+      logFile = sd.open(LOG_PATH, FILE_WRITE);
+      if (logFile) {
+        logFile.print(now);
+        logFile.print(','); logFile.print(t_raw, 2);
+        logFile.print(','); logFile.print(h_raw, 2);
+        logFile.print(','); logFile.print(p_raw_hpa, 2);
+        logFile.print(','); logFile.print(g_raw_kohm, 2);
+        logFile.print(','); logFile.println(cached_slp, 2);
+        logFile.close();
+      } else {
+        sd_ready = false; // force remount attempt later
+      }
+    } else {
+      // Attempt to mount lazily if not already ready
+      initSDCard();
+    }
 
     // Update derived values when environment data changes
     updateCachedDerived();
@@ -676,6 +721,8 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   Wire.begin();
+
+  initSDCard();
 
   Serial.println("Starting BME680...");
   if (!bme.begin(BME_ADDR)) {
