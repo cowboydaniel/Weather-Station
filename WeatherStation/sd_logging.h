@@ -3,15 +3,13 @@
 
 #include <SdFat.h>
 
-// Software SPI pins (avoid conflicts with WiFi's hardware SPI)
-// Hardware SPI (WiFi uses): 10, 11, 12, 13
-// Our software SPI pins:
-const uint8_t SD_SOFT_MOSI = 8;
-const uint8_t SD_SOFT_MISO = 9;
-const uint8_t SD_SOFT_SCK = 6;
-const uint8_t SD_SOFT_CS = 7;
+// SD card configuration using SdFat with DEDICATED_SPI
+// CS pin 7 (WiFi uses pin 10, so no conflict)
+const uint8_t SD_CS_PIN = 7;
+const uint32_t SPI_CLOCK = 25000000;  // 25 MHz - proven stable on UNO R4
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SPI_CLOCK)
 
-// SD card object using software SPI configuration
+// SD card object
 SdFat32 sd;
 File32 logFile;
 
@@ -29,18 +27,16 @@ SDInfo sd_info;
 
 // ============ SD INITIALIZATION ============
 bool initSDCard() {
-  Serial.println("Initializing SD card with software SPI...");
+  Serial.println("Initializing SD card on pin 7 with SdFat...");
 
-  // Configure software SPI with custom pins
-  SdSpiConfig spiConfig(SD_SOFT_CS, SHARED_SPI, SD_SCK_MHZ(10),
-                        SD_SOFT_MOSI, SD_SOFT_MISO, SD_SOFT_SCK);
-
-  if (!sd.begin(spiConfig)) {
+  if (!sd.begin(SD_CONFIG)) {
     strcpy(sd_info.error_msg, "SD init failed");
     Serial.println("SD card initialization failed!");
     sd_info.initialized = false;
     return false;
   }
+
+  sd_info.initialized = true;
 
   // Get card info
   sd_info.total_bytes = (uint32_t)sd.card()->cardSize() * 512;
@@ -49,7 +45,6 @@ bool initSDCard() {
   uint32_t freeClusters = sd.vol()->freeClusterCount();
   uint32_t clusterSize = sd.vol()->sectorsPerCluster() * 512;
   sd_info.free_bytes = freeClusters * clusterSize;
-  sd_info.initialized = true;
 
   Serial.print("SD card initialized. Total: ");
   Serial.print(sd_info.total_bytes / (1024*1024));
@@ -60,6 +55,9 @@ bool initSDCard() {
   return true;
 }
 
+// Forward declaration - RingF is defined in main sketch
+struct RingF;
+
 // ============ LOAD HISTORY FROM CSV ============
 bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
                        RingF &gasSeries, RingF &slpTrend) {
@@ -68,6 +66,7 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
     return false;
   }
 
+  // Check if file exists
   if (!sd.exists("data.csv")) {
     Serial.println("No existing data.csv found, starting fresh");
     sd_info.logged_samples = 0;
@@ -127,7 +126,7 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
   logFile.close();
 
   sd_info.logged_samples = sample_count;
-  sd_info.file_size = logFile.fileSize();
+  sd_info.file_size = logFile.size();
 
   Serial.print("Loaded ");
   Serial.print(sample_count);
@@ -144,7 +143,7 @@ bool logSensorReading(unsigned long timestamp_ms, float temp_c, float hum_pct,
   }
 
   // Open file in append mode
-  if (!logFile.open("data.csv", O_WRONLY | O_APPEND | O_CREAT)) {
+  if (!logFile.open("data.csv", O_WRONLY | O_CREAT | O_APPEND)) {
     strcpy(sd_info.error_msg, "Cannot open data.csv");
     return false;
   }
