@@ -713,6 +713,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
+  Serial.println("System starting...");
   Serial.println("Connecting to WiFi...");
   while (WiFi.begin(ssid, pass) != WL_CONNECTED) delay(1000);
 
