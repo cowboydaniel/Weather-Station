@@ -5,13 +5,13 @@
 
 // SD card configuration using SdFat with DEDICATED_SPI
 // CS pin 7 (WiFi uses pin 10, so no conflict)
-const uint8_t SD_CS_PIN = 7;
-const uint32_t SPI_CLOCK = 25000000;  // 25 MHz - proven stable on UNO R4
+#define SD_CS_PIN 7
+#define SPI_CLOCK 25  // 25 MHz - proven stable on UNO R4
 #define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SPI_CLOCK)
 
 // SD card object
-SdFat32 sd;
-File32 logFile;
+SdFat sd;
+File logFile;
 
 // SD card status
 struct SDInfo {
