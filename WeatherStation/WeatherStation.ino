@@ -3,7 +3,6 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h>
 #include <math.h>
-#include <stdint.h>
 
 // Pages (HTML lives in these headers)
 #include "page_index.h"
@@ -32,12 +31,8 @@ const uint32_t ENV_INTERVAL_MS = 1000;  // temp/hum/pressure
 const uint32_t GAS_INTERVAL_MS = 3000;  // gas resistance
 
 // History sizes
-const int ENV_SERIES_POINTS = 600;      // 10 minutes @ 1 Hz (fast buffer)
-const int ENV_SERIES_MIN_POINTS = 1440; // 24 hours @ 1-minute samples (long buffer)
-const int GAS_SERIES_POINTS = 200;      // 10 minutes @ 3 s (fast buffer)
-const int GAS_SERIES_MIN_POINTS = 1440; // 24 hours @ 1-minute samples (long buffer)
-const int16_t SCALE_SENTINEL = INT16_MIN;
-const float SCALE_10 = 10.0f;
+const int ENV_SERIES_POINTS = 600;  // 10 minutes @ 1 Hz
+const int GAS_SERIES_POINTS = 200;  // 10 minutes @ 3 s
 const uint32_t SLP_TREND_SAMPLE_MS = 60000; // 1-minute samples
 const int SLP_TREND_POINTS = 60;            // 60 minutes history
 const int SLP_TREND_WINDOW_MIN = 15;        // slope over 15 minutes
@@ -60,9 +55,8 @@ struct RingF {
   int size;
   int next;
   int count;
-  uint32_t total;
 
-  RingF(int n) : size(n), next(0), count(0), total(0) {
+  RingF(int n) : size(n), next(0), count(0) {
     buf = new float[n];
     for (int i = 0; i < n; i++) buf[i] = NAN;
   }
@@ -71,51 +65,13 @@ struct RingF {
     buf[next] = v;
     next = (next + 1) % size;
     if (count < size) count++;
-    total++;
-  }
-};
-
-// Compact int16 ring buffer (stores scaled values)
-struct RingI16 {
-  int16_t *buf;
-  int size;
-  int next;
-  int count;
-  float scale;
-
-  RingI16(int n, float s) : size(n), next(0), count(0), scale(s) {
-    buf = new int16_t[n];
-    for (int i = 0; i < n; i++) buf[i] = SCALE_SENTINEL;
-  }
-
-  void push(float v) {
-    int16_t stored = SCALE_SENTINEL;
-    if (isfinite(v)) {
-      float scaled = v * scale;
-      if (scaled > 32766.0f) scaled = 32766.0f;
-      if (scaled < -32766.0f) scaled = -32766.0f;
-      stored = (int16_t)lroundf(scaled);
-    }
-    buf[next] = stored;
-    next = (next + 1) % size;
-    if (count < size) count++;
-  }
-
-  float at(int idx) const {
-    int16_t v = buf[idx];
-    if (v == SCALE_SENTINEL) return NAN;
-    return (float)v / scale;
   }
 };
 
 RingF tempSeries(ENV_SERIES_POINTS);
 RingF humSeries(ENV_SERIES_POINTS);
 RingF pressSeries(ENV_SERIES_POINTS);     // station pressure hPa
-RingI16 tempSeriesMin(ENV_SERIES_MIN_POINTS, SCALE_10);   // 0.1 °C resolution
-RingI16 humSeriesMin(ENV_SERIES_MIN_POINTS, SCALE_10);    // 0.1 % resolution
-RingI16 pressSeriesMin(ENV_SERIES_MIN_POINTS, SCALE_10);  // 0.1 hPa resolution
 RingF gasSeries(GAS_SERIES_POINTS);       // gas kOhm
-RingI16 gasSeriesMin(GAS_SERIES_MIN_POINTS, SCALE_10);    // 0.1 kΩ resolution
 
 RingF slpTrend(SLP_TREND_POINTS);         // sea-level pressure trend (1/min)
 uint32_t last_slp_trend_ms = 0;
@@ -301,24 +257,6 @@ static void jsonWriteSeries(WiFiClient &c, const RingF &r, int decimals) {
   jsonFlush(c);
 }
 
-static void jsonWriteSeriesScaled(WiFiClient &c, const RingI16 &r, int decimals) {
-  jsonBufPos = 0;  // Reset buffer
-  jsonAppend(c, "[");
-
-  int count = r.count;
-  int start = r.next - count;
-  while (start < 0) start += r.size;
-
-  for (int i = 0; i < count; i++) {
-    int idx = (start + i) % r.size;
-    float v = r.at(idx);
-    jsonAppendFloat(c, v, decimals);
-    if (i != count - 1) jsonAppend(c, ",");
-  }
-  jsonAppend(c, "]");
-  jsonFlush(c);
-}
-
 // Update cached derived values (called when sensor values change)
 static void updateCachedDerived() {
   cached_slp = seaLevelPressure_hPa(p_raw_hpa, t_raw, ALTITUDE_M);
@@ -356,10 +294,6 @@ static void updateSampling() {
   if (now - last_slp_trend_ms >= SLP_TREND_SAMPLE_MS) {
     last_slp_trend_ms = now;
     slpTrend.push(cached_slp);
-    tempSeriesMin.push(t_raw);
-    humSeriesMin.push(h_raw);
-    pressSeriesMin.push(p_raw_hpa);
-    gasSeriesMin.push(g_raw_kohm);
     // Recompute tendency after adding new trend point
     cached_tend = pressureTendency_hPaPerHour(cached_slp, SLP_TREND_WINDOW_MIN);
     cached_storm = stormScore(cached_slp, cached_tend, h_raw);
@@ -375,8 +309,6 @@ static void sendJSONTemp(WiFiClient &c) {
   c.println();
   c.print("{\"ok\":true,\"unit\":\"C\",\"interval_ms\":"); c.print(ENV_INTERVAL_MS);
   c.print(",\"series\":"); jsonWriteSeries(c, tempSeries, 2);
-  c.print(",\"min_interval_ms\":"); c.print(SLP_TREND_SAMPLE_MS);
-  c.print(",\"series_min\":"); jsonWriteSeriesScaled(c, tempSeriesMin, 2);
   c.println("}");
 }
 
@@ -388,8 +320,6 @@ static void sendJSONHumidity(WiFiClient &c) {
   c.println();
   c.print("{\"ok\":true,\"unit\":\"%\",\"interval_ms\":"); c.print(ENV_INTERVAL_MS);
   c.print(",\"series\":"); jsonWriteSeries(c, humSeries, 2);
-  c.print(",\"min_interval_ms\":"); c.print(SLP_TREND_SAMPLE_MS);
-  c.print(",\"series_min\":"); jsonWriteSeriesScaled(c, humSeriesMin, 2);
   c.println("}");
 }
 
@@ -405,8 +335,6 @@ static void sendJSONPressure(WiFiClient &c) {
   c.print("\"unit\":\"hPa\",");
   c.print("\"interval_ms\":"); c.print(ENV_INTERVAL_MS); c.print(",");
   c.print("\"station_series\":"); jsonWriteSeries(c, pressSeries, 2); c.print(",");
-  c.print("\"station_min_interval_ms\":"); c.print(SLP_TREND_SAMPLE_MS); c.print(",");
-  c.print("\"station_series_min\":"); jsonWriteSeriesScaled(c, pressSeriesMin, 2); c.print(",");
   c.print("\"slp_now\":"); c.print(cached_slp, 2); c.print(",");
   c.print("\"slp_trend_interval_ms\":"); c.print(SLP_TREND_SAMPLE_MS); c.print(",");
   c.print("\"slp_trend_series\":"); jsonWriteSeries(c, slpTrend, 2); c.print(",");
@@ -423,8 +351,6 @@ static void sendJSONGas(WiFiClient &c) {
   c.println();
   c.print("{\"ok\":true,\"unit\":\"kOhm\",\"interval_ms\":"); c.print(GAS_INTERVAL_MS);
   c.print(",\"series\":"); jsonWriteSeries(c, gasSeries, 2);
-  c.print(",\"min_interval_ms\":"); c.print(SLP_TREND_SAMPLE_MS);
-  c.print(",\"series_min\":"); jsonWriteSeriesScaled(c, gasSeriesMin, 2);
   c.println("}");
 }
 
@@ -666,9 +592,8 @@ static void send404(WiFiClient &c) {
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
+  while (!Serial) {}
 
-  Serial.println("System starting...");
   Serial.println("Connecting to WiFi...");
   while (WiFi.begin(ssid, pass) != WL_CONNECTED) delay(1000);
 

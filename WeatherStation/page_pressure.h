@@ -48,9 +48,6 @@ static void sendPagePressure(WiFiClient &client) {
 <script>
 const station = setupCanvas('cv1', 260);
 const slpTrendChart = setupCanvas('cv2', 260);
-const settings = loadUserSettings();
-const spanSec = Math.max(60, settings.graphSpan || 600);
-const showGrid = settings.showGrid !== false;
 
 async function tick(){
   try{
@@ -62,15 +59,8 @@ async function tick(){
     tend.textContent = j.tendency;
     slope.textContent = j.tendency_hpa_hr.toFixed(2) + " hPa/hr";
 
-    const pickedStation = pickSeriesBySpan({
-      station_series: j.station_series,
-      station_series_min: j.station_series_min,
-      interval_ms: j.interval_ms,
-      station_min_interval_ms: j.station_min_interval_ms
-    }, spanSec);
-
-    drawLineSeries(station.ctx, station.cv, pickedStation.series || [], {padFraction:0.15, minPad:0.2, showGrid});
-    drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, j.slp_trend_series || [], {padFraction:0.15, minPad:0.2, showGrid});
+    drawLineSeries(station.ctx, station.cv, j.station_series || [], {padFraction:0.15, minPad:0.2});
+    drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, j.slp_trend_series || [], {padFraction:0.15, minPad:0.2});
   }catch(e){}
 }
 tick(); setInterval(tick, 2000);  // 2s polling - data updates at 1Hz anyway
