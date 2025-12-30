@@ -637,8 +637,10 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
   Serial.println("Loading historical data from CSV...");
 
   uint32_t sample_count = 0;
+  uint32_t skipped_lines = 0;
   char line[128];
   int line_len = 0;
+  bool first_line = true;
 
   // Read and parse each line
   while (logFile.available()) {
@@ -647,6 +649,19 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
     if (c == '\n' || c == -1) {
       if (line_len > 0) {
         line[line_len] = '\0';
+
+        // Skip header line (if first line contains non-numeric data)
+        if (first_line) {
+          first_line = false;
+          // Check if this looks like a header (starts with 't' from "timestamp_ms")
+          if (line[0] < '0' || line[0] > '9') {
+            Serial.println("Skipping CSV header line");
+            skipped_lines++;
+            line_len = 0;
+            if (c == -1) break;
+            continue;
+          }
+        }
 
         // Parse CSV: timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
         unsigned long ts = 0;
@@ -665,6 +680,13 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
 
           sample_count++;
+        } else if (parsed != 5) {
+          // Debug: log lines that failed to parse
+          Serial.print("Parse failed (got ");
+          Serial.print(parsed);
+          Serial.print(" fields): ");
+          Serial.println(line);
+          skipped_lines++;
         }
       }
 
@@ -684,7 +706,9 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
 
   Serial.print("Loaded ");
   Serial.print(sample_count);
-  Serial.println(" samples from SD card");
+  Serial.print(" samples from SD card (skipped ");
+  Serial.print(skipped_lines);
+  Serial.println(" lines)");
 
   return true;
 }
