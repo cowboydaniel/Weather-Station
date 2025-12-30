@@ -502,13 +502,20 @@ static void sendJSONStats(WiFiClient &c) {
   // Arduino UNO R4 WiFi has 32KB SRAM
   const uint32_t TOTAL_RAM = 32768;
 
-  // Calculate actual free RAM: stack pointer - heap end (Renesas RA4M1 compatible)
-  // The BSS section ends where the heap begins; stack grows downward from high addresses
-  extern char __bss_end;
+  // Estimate free RAM by measuring gap between heap and stack
+  // Stack grows downward from high memory; measure current stack pointer
+  static uint32_t minStackPointer = 0;
   char stackVar;
-  uint32_t stackPointer = (uint32_t)&stackVar;
-  uint32_t heapEnd = (uint32_t)&__bss_end;
-  uint32_t freeRam = (stackPointer > heapEnd) ? (stackPointer - heapEnd) : 0;
+  uint32_t currentStackPointer = (uint32_t)&stackVar;
+
+  // Track the lowest stack pointer seen (closest to heap)
+  if (minStackPointer == 0 || currentStackPointer < minStackPointer) {
+    minStackPointer = currentStackPointer;
+  }
+
+  // Estimate free RAM from heap to lowest stack pointer observed
+  uint32_t estimatedHeapEnd = 0x20000000;  // Start of SRAM on Renesas RA4M1
+  uint32_t freeRam = (minStackPointer > estimatedHeapEnd) ? (minStackPointer - estimatedHeapEnd) : 0;
 
   // Calculate average response time
   float avgMs = (req_total > 0) ? (float)req_time_sum / (float)req_total : 0;
