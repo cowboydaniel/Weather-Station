@@ -16,8 +16,8 @@ File logFile;
 // SD card status
 struct SDInfo {
   bool initialized = false;
-  uint32_t total_bytes = 0;
-  uint32_t free_bytes = 0;
+  uint64_t total_bytes = 0;  // uint64_t to handle cards > 4GB
+  uint64_t free_bytes = 0;   // uint64_t to handle cards > 4GB
   uint32_t logged_samples = 0;
   unsigned long file_size = 0;
   char error_msg[64] = "";
@@ -38,13 +38,14 @@ bool initSDCard() {
 
   sd_info.initialized = true;
 
-  // Get card info
-  sd_info.total_bytes = (uint32_t)sd.card()->cardSize() * 512;
+  // Get card info (use uint64_t to handle cards larger than 4GB)
+  uint64_t cardSize = sd.card()->cardSize();
+  sd_info.total_bytes = cardSize * 512;
 
   // Calculate free space
   uint32_t freeClusters = sd.vol()->freeClusterCount();
   uint32_t clusterSize = sd.vol()->sectorsPerCluster() * 512;
-  sd_info.free_bytes = freeClusters * clusterSize;
+  sd_info.free_bytes = (uint64_t)freeClusters * clusterSize;
 
   Serial.print("SD card initialized. Total: ");
   Serial.print(sd_info.total_bytes / (1024*1024));
