@@ -7,6 +7,9 @@
 // SD card logging with software SPI
 #include "sd_logging.h"
 
+// WiFi connection manager with exponential backoff
+#include "wifi_manager.h"
+
 // Pages (HTML lives in these headers)
 #include "page_index.h"
 #include "page_temp.h"
@@ -690,12 +693,11 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 
-  Serial.println("Connecting to WiFi...");
-  while (WiFi.begin(ssid, pass) != WL_CONNECTED) delay(1000);
-
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  // Initialize WiFi manager for non-blocking connection with exponential backoff
+  initWiFiManager();
+  Serial.println("Connecting to WiFi (non-blocking)...");
+  WiFi.begin(ssid, pass);  // Initiate connection attempt
+  // Connection happens in background; status checked periodically in loop()
 
   Wire.begin();
 
@@ -734,6 +736,9 @@ void setup() {
 
 void loop() {
   updateSampling();
+
+  // Check WiFi status and attempt reconnection if needed
+  updateWiFiStatus(ssid, pass);
 
   // Calculate loop rate (update every second)
   loop_count++;
