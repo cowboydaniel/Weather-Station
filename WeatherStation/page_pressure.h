@@ -69,7 +69,9 @@ const slpTrendChart = setupCanvas('cv2', 260);
 let pageState = {
   selectedDate: '',
   selectedTimeframe: 600,
-  availableDates: []
+  availableDates: [],
+  calendarMonth: new Date().getMonth(),
+  calendarYear: new Date().getFullYear()
 };
 
 function getChartEndpoint(baseEndpoint, selectedDate, timeframe) {
@@ -87,8 +89,8 @@ function renderCalendar() {
   if (!container) return;
 
   const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
+  const year = pageState.calendarYear;
+  const month = pageState.calendarMonth;
 
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
@@ -96,9 +98,20 @@ function renderCalendar() {
   const startingDayOfWeek = firstDay.getDay();
 
   let html = '<div class="calendar-header">';
-  html += '<div>' + firstDay.toLocaleDateString('en-US', {month: 'short', year: 'numeric'}) + '</div>';
+  html += '<div class="calendar-nav">';
+  html += '<button data-action="prev-month">&lt;</button>';
   html += '</div>';
+  html += '<div>' + firstDay.toLocaleDateString('en-US', {month: 'short', year: 'numeric'}) + '</div>';
+  html += '<div class="calendar-nav">';
+  html += '<button data-action="next-month">&gt;</button>';
+  html += '</div>';
+  html += '</div>';
+
   html += '<div class="calendar-dates">';
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  for (let i = 0; i < 7; i++) {
+    html += '<div class="calendar-weekday">' + weekdays[i] + '</div>';
+  }
 
   for (let i = 0; i < startingDayOfWeek; i++) {
     html += '<div class="calendar-date disabled"></div>';
@@ -116,6 +129,25 @@ function renderCalendar() {
 
   html += '</div>';
   container.innerHTML = html;
+
+  container.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      if (e.target.dataset.action === 'prev-month') {
+        pageState.calendarMonth--;
+        if (pageState.calendarMonth < 0) {
+          pageState.calendarMonth = 11;
+          pageState.calendarYear--;
+        }
+      } else if (e.target.dataset.action === 'next-month') {
+        pageState.calendarMonth++;
+        if (pageState.calendarMonth > 11) {
+          pageState.calendarMonth = 0;
+          pageState.calendarYear++;
+        }
+      }
+      renderCalendar();
+    });
+  });
 
   container.querySelectorAll('[data-date]').forEach(el => {
     el.addEventListener('click', (e) => {
