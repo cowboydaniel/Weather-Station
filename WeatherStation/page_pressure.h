@@ -31,8 +31,6 @@ static void sendPagePressure(WiFiClient &client) {
   <div class="card">
     <div class="kpis">
       <div class="kpi">SLP now: <b id="slp">--</b></div>
-      <div class="kpi">Tendency: <b id="tend">--</b></div>
-      <div class="kpi">Slope: <b id="slope">--</b></div>
       <div style="flex: 1;"></div>
       <div class="kpi">
         Date:
@@ -45,6 +43,11 @@ static void sendPagePressure(WiFiClient &client) {
     <div class="sep"></div>
     <div class="sub">Station pressure (hPa)</div>
     <canvas id="cv1" class="chart chart-md" width="1000" height="260"></canvas>
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; gap: 24px;">
+      <div><span style="font-size: 12px; color: rgba(255,255,255,0.6);">Average</span><div style="font-size: 16px; font-weight: 500;"><b id="avgv">--</b> hPa</div></div>
+      <div><span style="font-size: 12px; color: rgba(255,255,255,0.6);">Min</span><div style="font-size: 16px; font-weight: 500;"><b id="minv">--</b> hPa</div></div>
+      <div><span style="font-size: 12px; color: rgba(255,255,255,0.6);">Max</span><div style="font-size: 16px; font-weight: 500;"><b id="maxv">--</b> hPa</div></div>
+    </div>
 
     <div class="sep"></div>
     <div class="sub">Sea-level pressure trend (hPa)</div>
@@ -59,7 +62,9 @@ let selectedDate = '';
 
 function getChartEndpoint(baseEndpoint, selectedDate) {
   if (selectedDate) {
-    return baseEndpoint + '?date=' + encodeURIComponent(selectedDate);
+    // Use per-day endpoint with the new date-specific API
+    // e.g., /api/pressure-date?date=2024-01-15
+    return baseEndpoint + '-date?date=' + encodeURIComponent(selectedDate);
   }
 
   const saved = localStorage.getItem('weatherSettings');

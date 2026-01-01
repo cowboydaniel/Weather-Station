@@ -63,7 +63,11 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
                        RingF &gasSeries, RingF &slpTrend);
 
 // ============ LOG READING TO CSV ============
+// Forward declaration for helper function (will be defined in main sketch)
+extern void getCurrentDateString(char* dateStr, int maxLen);
+
 // All possible sensor data for complete historical logging
+// Logs to per-day files: YYYY-MM-DD.csv
 bool logSensorReading(unsigned long timestamp_ms,
                       float temp_c, float hum_pct,
                       float press_station_hpa, float press_sealevel_hpa,
@@ -74,9 +78,17 @@ bool logSensorReading(unsigned long timestamp_ms,
     return false;
   }
 
+  // Get current date string for filename (YYYY-MM-DD)
+  char date_str[16];
+  getCurrentDateString(date_str, sizeof(date_str));
+
+  // Construct filename: YYYY-MM-DD.csv
+  char filename[32];
+  snprintf(filename, sizeof(filename), "%s.csv", date_str);
+
   // Open file in append mode
-  if (!logFile.open("data.csv", O_WRONLY | O_CREAT | O_APPEND)) {
-    strcpy(sd_info.error_msg, "Cannot open data.csv");
+  if (!logFile.open(filename, O_WRONLY | O_CREAT | O_APPEND)) {
+    strcpy(sd_info.error_msg, "Cannot open daily CSV");
     return false;
   }
 
