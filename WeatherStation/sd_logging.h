@@ -2,6 +2,7 @@
 #define SD_LOGGING_H
 
 #include <SdFat.h>
+#include <inttypes.h>
 
 // SD card configuration using SdFat with DEDICATED_SPI
 // CS pin 7 (WiFi uses pin 10, so no conflict)
@@ -69,7 +70,7 @@ void getCurrentDateString(char* dateStr, int maxLen);
 
 // All possible sensor data for complete historical logging
 // Logs to per-day files: YYYY-MM-DD.csv
-bool logSensorReading(unsigned long timestamp_ms,
+bool logSensorReading(uint64_t timestamp_ms,
                       float temp_c, float hum_pct,
                       float press_station_hpa, float press_sealevel_hpa,
                       float dew_point_c, float heat_index_c,
@@ -106,8 +107,8 @@ bool logSensorReading(unsigned long timestamp_ms,
   //         dew_point_c,heat_index_c,pressure_tendency_hpa_per_3h,storm_score,gas_kohm
   char buffer[256];
   snprintf(buffer, sizeof(buffer),
-           "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
-           timestamp_ms, temp_c, hum_pct,
+           "%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+           (unsigned long long)timestamp_ms, temp_c, hum_pct,
            press_station_hpa, press_sealevel_hpa,
            dew_point_c, heat_index_c,
            pressure_tendency_hpa_per_3h, storm_score, gas_kohm);

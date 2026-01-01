@@ -5,7 +5,9 @@
 #include <RTC.h>
 #include <WiFiUdp.h>
 #include <NTPClient.h>
+#include <inttypes.h>
 #include <math.h>
+#include <stdlib.h>
 #include <time.h>
 
 // SD card logging with software SPI
@@ -316,7 +318,7 @@ static void updateSampling() {
     // Log to SD card (even if WiFi is disconnected) but only after time is synced
     // This prevents creating CSV files with invalid timestamps before NTP succeeds
     if (sd_info.initialized && ntp_sync_successful) {
-      unsigned long rtcTimestampMs = getCurrentTimeMs();
+      uint64_t rtcTimestampMs = getCurrentTimeMs();
       logSensorReading(rtcTimestampMs, t_raw, h_raw, p_raw_hpa, cached_slp,
                        cached_dp, cached_hi, cached_tend, cached_storm, g_raw_kohm);
     }
@@ -521,17 +523,23 @@ static void sendAvailableDates(WiFiClient &c) {
         if (len > 10) {
           // Extract date from timestamp (first column is timestamp_ms)
           // Convert timestamp_ms to date string
-          uint32_t ts_ms = 0;
+          uint64_t ts_ms = 0;
           for (int i = 0; i < len && line[i] != ','; i++) {
-            ts_ms = ts_ms * 10 + (line[i] - '0');
+            if (line[i] >= '0' && line[i] <= '9') {
+              ts_ms = ts_ms * 10ULL + (line[i] - '0');
+            } else {
+              ts_ms = 0;
+              break;
+            }
           }
 
-          uint32_t ts_sec = ts_ms / 1000;
-          uint32_t days_since_epoch = ts_sec / 86400;
+          uint64_t ts_sec = ts_ms / 1000ULL;
+          uint64_t days_since_epoch = ts_sec / 86400ULL;
 
           // Simple date calculation (valid from 1970)
           uint16_t year = 1970;
-          uint8_t month = 1, day = 1;
+          uint8_t month = 1;
+          uint16_t day = 1;
           uint16_t days_in_year[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
 
           while (days_since_epoch >= 365) {
@@ -889,7 +897,7 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
         }
 
         // Parse line to extract timestamp and metric value
-        unsigned long ts = 0;
+        uint64_t ts = 0;
         float value = NAN;
         int field = 0;
         int start = 0;
@@ -903,7 +911,7 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
               field_str[len] = '\0';
 
               if (field == 0) {
-                ts = strtoul(field_str, NULL, 10);
+                ts = strtoull(field_str, NULL, 10);
               } else if (field == metric_field) {
                 value = strtof(field_str, NULL);
                 break;  // Got what we need
@@ -918,7 +926,9 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
         if (isfinite(value)) {
           if (!first_data) c.print(",");
           c.print("[");
-          c.print(ts);
+          char ts_buf[32];
+          snprintf(ts_buf, sizeof(ts_buf), "%llu", (unsigned long long)ts);
+          c.print(ts_buf);
           c.print(",");
           c.print(value, 2);
           c.print("]");
@@ -976,7 +986,7 @@ static uint32_t loadCSVFile(const char* filename,
         }
 
         // Parse CSV
-        unsigned long ts = 0;
+        uint64_t ts = 0;
         float temp = NAN, hum = NAN, press_station = NAN, press_slp = NAN;
         float dp = NAN, hi = NAN, tend = NAN, storm = NAN, gas = NAN;
 
@@ -993,7 +1003,7 @@ static uint32_t loadCSVFile(const char* filename,
               field_str[len] = '\0';
 
               switch(field) {
-                case 0: ts = strtoul(field_str, NULL, 10); parsed++; break;
+                case 0: ts = strtoull(field_str, NULL, 10); parsed++; break;
                 case 1: temp = strtof(field_str, NULL); parsed++; break;
                 case 2: hum = strtof(field_str, NULL); parsed++; break;
                 case 3: press_station = strtof(field_str, NULL); parsed++; break;
@@ -1200,7 +1210,7 @@ void getCurrentDateString(char* dateStr, int maxLen) {
 }
 
 // Get current timestamp in milliseconds (real clock time, not millis())
-static unsigned long getCurrentTimeMs() {
+static uint64_t getCurrentTimeMs() {
   RTCTime currentTime;
   RTC.getTime(currentTime);
 
@@ -1217,7 +1227,7 @@ static unsigned long getCurrentTimeMs() {
   tm_info.tm_isdst = -1;  // Let mktime determine DST
 
   time_t unixTime = mktime(&tm_info);
-  return (unsigned long)unixTime * 1000;  // Convert seconds to milliseconds
+  return (uint64_t)unixTime * 1000ULL;  // Convert seconds to milliseconds
 }
 
 void setup() {
