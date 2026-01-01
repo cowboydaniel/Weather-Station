@@ -1160,6 +1160,10 @@ static void flushMinuteBucket(uint64_t bucketMinute,
 // Rebuild the 24h cache from the latest per-day CSV file
 static bool rebuild24hCacheFromSD() {
   if (!sd_info.initialized) return false;
+  if (!tempSeries_24h.buf || !humSeries_24h.buf || !pressSeries_24h.buf || !gasSeries_24h.buf) {
+    Serial.println("[24h] Skipping rebuild - buffers not allocated");
+    return false;
+  }
 
   char filename[32];
   if (!selectDownsampleSource(filename, sizeof(filename))) {
@@ -1202,6 +1206,7 @@ static bool rebuild24hCacheFromSD() {
   char line[160];
   int line_len = 0;
   bool first_line = true;
+  uint32_t linesProcessed = 0;
 
   while (file.available()) {
     int c = file.read();
@@ -1268,6 +1273,18 @@ static bool rebuild24hCacheFromSD() {
           if (isfinite(hum)) { humSum += hum; humCount++; }
           if (isfinite(press_station)) { pressSum += press_station; pressCount++; }
           if (isfinite(gas)) { gasSum += gas; gasCount++; }
+        }
+
+        linesProcessed++;
+        if ((linesProcessed & 0xFF) == 0) {
+          // Yield to avoid watchdogs while processing large files
+          delay(1);
+          if (tempSeries_24h.count >= tempSeries_24h.size &&
+              humSeries_24h.count >= humSeries_24h.size &&
+              pressSeries_24h.count >= pressSeries_24h.size &&
+              gasSeries_24h.count >= gasSeries_24h.size) {
+            break;  // Filled buffers; no need to scan rest of file
+          }
         }
       }
 
