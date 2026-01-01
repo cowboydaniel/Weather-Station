@@ -259,12 +259,23 @@ if (timeframeSelect) {
     localStorage.setItem('humidityGraphSpan', pageState.selectedTimeframe);
 
     const datePickerBtn = $('datePickerBtn');
-    if (pageState.selectedTimeframe === 86400) {
+    const today = new Date();
+    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+    if (pageState.selectedTimeframe >= 21600) {  // 6hr or longer: 6hr=21600, 12hr=43200, 24hr=86400
+      // Auto-load today's data from SD card
+      pageState.selectedDate = todayStr;
       datePickerBtn.style.display = 'inline-block';
-      openCalendarModal();
+      datePickerBtn.textContent = todayStr;
+      if (pageState.selectedTimeframe === 86400) {
+        // Only show calendar for 24hr mode
+        // Don't auto-open, but allow manual date picking
+      }
+      closeCalendarModal();
     } else {
-      datePickerBtn.style.display = 'none';
+      // Live data from RAM buffer (1m, 5m, 10m)
       pageState.selectedDate = '';
+      datePickerBtn.style.display = 'none';
       closeCalendarModal();
     }
     recreatePage();
