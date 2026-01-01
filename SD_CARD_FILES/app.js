@@ -1,5 +1,11 @@
 const $ = (id) => document.getElementById(id);
 
+// Inject shared calendar modal once on page load
+if (!document.getElementById('calendarModal')) {
+  const calendarHTML = '<div id="calendarModal" class="calendar-modal" style="display:none;"><div class="calendar-modal-overlay"></div><div class="calendar-modal-content"><div class="calendar-modal-header"><h3>Select Date</h3><button id="calendarCloseBtn" class="calendar-modal-close">&times;</button></div><div class="calendar-widget-container"><div class="calendar-nav-row"><button class="calendar-nav-btn" id="prevMonth">‹</button><div class="calendar-month-year" id="monthYear">Jan 2026</div><button class="calendar-nav-btn" id="nextMonth">›</button></div><div class="calendar-weekdays"><div class="calendar-weekday-label">M</div><div class="calendar-weekday-label">T</div><div class="calendar-weekday-label">W</div><div class="calendar-weekday-label">T</div><div class="calendar-weekday-label">F</div><div class="calendar-weekday-label">S</div><div class="calendar-weekday-label">S</div></div><div class="calendar-days" id="calendarDays"></div></div></div></div>';
+  document.body.insertAdjacentHTML('afterbegin', calendarHTML);
+}
+
 function setupCanvas(id, heightPx){
   const cv = $(id);
   const ctx = cv.getContext('2d');

@@ -45,34 +45,6 @@ static void sendPageGas(WiFiClient &client) {
       <span class="timeframe-label" style="margin-left: 16px;">Date:</span>
       <button id="datePickerBtn" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">Today (Live)</button>
     </div>
-
-    <!-- Calendar Modal Overlay -->
-    <div id="calendarModal" class="calendar-modal" style="display: none;">
-      <div class="calendar-modal-overlay"></div>
-      <div class="calendar-modal-content">
-        <div class="calendar-modal-header">
-          <h3>Select Date</h3>
-          <button id="calendarCloseBtn" class="calendar-modal-close">&times;</button>
-        </div>
-        <div class="calendar-widget-container">
-          <div class="calendar-nav-row">
-            <button class="calendar-nav-btn" id="prevMonth" aria-label="Previous month">‹</button>
-            <div class="calendar-month-year" id="monthYear">January 2026</div>
-            <button class="calendar-nav-btn" id="nextMonth" aria-label="Next month">›</button>
-          </div>
-          <div class="calendar-weekdays">
-            <div class="calendar-weekday-label">Mon</div>
-            <div class="calendar-weekday-label">Tue</div>
-            <div class="calendar-weekday-label">Wed</div>
-            <div class="calendar-weekday-label">Thu</div>
-            <div class="calendar-weekday-label">Fri</div>
-            <div class="calendar-weekday-label">Sat</div>
-            <div class="calendar-weekday-label">Sun</div>
-          </div>
-          <div class="calendar-days" id="calendarDays"></div>
-        </div>
-      </div>
-    </div>
     <div style="margin-top:12px">
       <canvas id="cv" class="chart chart-lg" width="1000" height="360"></canvas>
     </div>
