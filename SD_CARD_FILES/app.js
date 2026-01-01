@@ -63,6 +63,11 @@ function drawLineSeries(ctx, cv, series, opts={}){
   let getX;
   const hasExpectedDuration = !!opts.expectedDurationMs;
   const hasInterval = typeof opts.interval_ms === 'number' && isFinite(opts.interval_ms);
+  const expectedCount = hasExpectedDuration && hasInterval
+    ? Math.max(1, Math.round(opts.expectedDurationMs / opts.interval_ms))
+    : null;
+  const pointCount = expectedCount ?? series.length;
+
   if (opts.timeMode === 'absolute' && Array.isArray(opts.timestamps) && opts.timestamps.length === series.length && hasExpectedDuration) {
     // For 24-hour view with timestamps: position data relative to start of day
     const firstTimestamp = opts.timestamps[0];
@@ -78,7 +83,7 @@ function drawLineSeries(ctx, cv, series, opts={}){
     };
   } else if (hasExpectedDuration && hasInterval) {
     // Relative time with expected duration: newest point at right edge, older points offset by elapsed time
-    const span = (series.length - 1) * opts.interval_ms;
+    const span = (pointCount - 1) * opts.interval_ms;
     const startOffset = Math.max(0, opts.expectedDurationMs - span); // leave leading blank space for missing samples
     getX = (i) => {
       const elapsedFromStart = startOffset + i * opts.interval_ms;
@@ -243,15 +248,22 @@ function startSimpleSeriesPage(cfg){
     const dpr = window.devicePixelRatio || 1;
     const relXScaled = relX * dpr;
 
-    let clampedIdx = 0;
+    let clampedIdx = -1;
     let minDist = Infinity;
     for (let i = 0; i < lastSeries.length; i++) {
+      const value = lastSeries[i];
+      if (typeof value !== 'number' || !isFinite(value)) continue; // skip placeholders
       const dataPointX = lastStats.getX ? lastStats.getX(i) : (i / (lastSeries.length - 1)) * w;
       const dist = Math.abs(relXScaled - dataPointX);
       if (dist < minDist) {
         minDist = dist;
         clampedIdx = i;
       }
+    }
+
+    if (clampedIdx === -1) {
+      tooltip.classList.remove('visible');
+      return;
     }
 
     // Hide tooltip if mouse is too far from any data point (e.g., in blank area)
@@ -262,11 +274,6 @@ function startSimpleSeriesPage(cfg){
     }
 
     const value = lastSeries[clampedIdx];
-
-    if (typeof value !== 'number' || !isFinite(value)) {
-      tooltip.classList.remove('visible');
-      return;
-    }
 
     // Build tooltip text
     let tooltipText = value.toFixed(decimals) + unit;
