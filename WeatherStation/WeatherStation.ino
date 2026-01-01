@@ -819,6 +819,12 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
     return;
   }
 
+  // Log file access
+  Serial.print("[API] Loading ");
+  Serial.print(filename);
+  Serial.print(" for ");
+  Serial.println(metric);
+
   // Determine which field to extract based on metric
   int metric_field = -1;
   if (strcmp(metric, "temp") == 0) metric_field = 1;
@@ -1015,6 +1021,68 @@ static uint32_t loadCSVFile(const char* filename,
   return sample_count;
 }
 
+// ============ LIST CSV FILES ============
+// List all YYYY-MM-DD.csv files on SD card in alphabetical order
+void listCSVFiles() {
+  if (!sd_info.initialized) {
+    return;
+  }
+
+  Serial.println("\n=== Available CSV Data Files ===");
+
+  // Open root directory
+  SdFile root;
+  if (!root.open("/")) {
+    Serial.println("Failed to open root directory");
+    return;
+  }
+
+  // Collect all CSV filenames
+  char filenames[100][11];  // Store up to 100 filenames, max 10 chars each (YYYY-MM-DD.csv = 14 chars, but we'll keep it safe)
+  int file_count = 0;
+
+  SdFile file;
+  while (file.openNext(&root, O_RDONLY) && file_count < 100) {
+    char name[32];
+    file.getName(name, sizeof(name));
+
+    // Check if filename matches YYYY-MM-DD.csv pattern (14 chars exactly)
+    if (strlen(name) == 14 && name[4] == '-' && name[7] == '-' &&
+        name[10] == '.' && name[11] == 'c' && name[12] == 's' && name[13] == 'v') {
+      strncpy(filenames[file_count], name, 10);
+      filenames[file_count][10] = '\0';
+      file_count++;
+    }
+    file.close();
+  }
+  root.close();
+
+  if (file_count == 0) {
+    Serial.println("No per-day CSV files found yet");
+  } else {
+    // Sort filenames alphabetically (simple bubble sort for small lists)
+    for (int i = 0; i < file_count - 1; i++) {
+      for (int j = i + 1; j < file_count; j++) {
+        if (strcmp(filenames[i], filenames[j]) > 0) {
+          char temp[11];
+          strcpy(temp, filenames[i]);
+          strcpy(filenames[i], filenames[j]);
+          strcpy(filenames[j], temp);
+        }
+      }
+    }
+
+    // Print sorted list
+    for (int i = 0; i < file_count; i++) {
+      Serial.print("  [");
+      Serial.print(i + 1);
+      Serial.print("] ");
+      Serial.println(filenames[i]);
+    }
+  }
+  Serial.println("===================================\n");
+}
+
 // Load historical data from per-day CSV files or legacy data.csv
 bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
                        RingF &gasSeries, RingF &slpTrend) {
@@ -1041,6 +1109,9 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
   }
 
   sd_info.logged_samples = total_samples;
+
+  // List all available CSV files
+  listCSVFiles();
 
   return true;
 }
