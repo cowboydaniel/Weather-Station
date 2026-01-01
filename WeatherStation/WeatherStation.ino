@@ -9,6 +9,8 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
+#include <limits.h>
+#include <new>
 
 // SD card logging with software SPI
 #include "sd_logging.h"
@@ -82,6 +84,12 @@ struct RingF {
     next = (next + 1) % size;
     if (count < size) count++;
   }
+
+  void reset(float fill = NAN) {
+    next = 0;
+    count = 0;
+    for (int i = 0; i < size; i++) buf[i] = fill;
+  }
 };
 
 RingF tempSeries(ENV_SERIES_POINTS);
@@ -94,6 +102,57 @@ RingF tempSeries_hourly(24);
 RingF humSeries_hourly(24);
 RingF pressSeries_hourly(24);              // station pressure hPa
 RingF gasSeries_hourly(24);                // gas kOhm
+
+// 24h downsampled (1-minute bins) history stored in compact int16 buffers to save SRAM
+struct RingS16 {
+  int16_t *buf;
+  int size;
+  int next;
+  int count;
+  float scale;
+  const int16_t sentinel;
+
+  RingS16(int n, float s) : size(n), next(0), count(0), scale(s), sentinel(INT16_MIN) {
+    buf = new (std::nothrow) int16_t[n];
+    reset();
+  }
+
+  void reset() {
+    if (!buf) return;
+    next = 0;
+    count = 0;
+    for (int i = 0; i < size; i++) {
+      buf[i] = sentinel;
+    }
+  }
+
+  void pushFloat(float v) {
+    if (!buf) return;
+    if (!isfinite(v)) {
+      buf[next] = sentinel;
+    } else {
+      int32_t scaled = (int32_t)roundf(v * scale);
+      if (scaled <= sentinel) scaled = sentinel + 1;  // avoid clashing with sentinel
+      if (scaled > INT16_MAX) scaled = INT16_MAX;
+      buf[next] = (int16_t)scaled;
+    }
+    next = (next + 1) % size;
+    if (count < size) count++;
+  }
+};
+
+const int MINUTE_SERIES_POINTS = 1440;  // 24h @ 1-minute resolution
+RingS16 tempSeries_24h(MINUTE_SERIES_POINTS, 100.0f);   // 0.01 C
+RingS16 humSeries_24h(MINUTE_SERIES_POINTS, 100.0f);    // 0.01 %
+RingS16 pressSeries_24h(MINUTE_SERIES_POINTS, 10.0f);   // 0.1 hPa (fits int16)
+RingS16 gasSeries_24h(MINUTE_SERIES_POINTS, 10.0f);     // 0.1 kOhm
+
+// 24h cache metadata
+static uint64_t downsample24h_start_ms = 0;
+static uint64_t downsample24h_end_ms = 0;
+static char downsample24h_source[16] = "";
+static bool downsample24h_ready = false;
+static uint32_t last_24h_downsample_ms = 0;
 
 RingF slpTrend(SLP_TREND_POINTS);         // sea-level pressure trend (1/min)
 uint32_t last_slp_trend_ms = 0;
@@ -288,6 +347,35 @@ static void jsonWriteSeries(WiFiClient &c, const RingF &r, int decimals) {
   jsonFlush(c);
 }
 
+static void jsonWriteSeriesScaled(WiFiClient &c, const RingS16 &r, int decimals) {
+  jsonBufPos = 0;  // Reset buffer
+  jsonAppend(c, "[");
+
+  if (!r.buf) {
+    jsonAppend(c, "]");
+    jsonFlush(c);
+    return;
+  }
+
+  int count = r.count;
+  int start = r.next - count;
+  while (start < 0) start += r.size;
+
+  for (int i = 0; i < count; i++) {
+    int idx = (start + i) % r.size;
+    int16_t raw = r.buf[idx];
+    if (raw == r.sentinel) {
+      jsonAppend(c, "null");
+    } else {
+      float v = (float)raw / r.scale;
+      jsonAppendFloat(c, v, decimals);
+    }
+    if (i != count - 1) jsonAppend(c, ",");
+  }
+  jsonAppend(c, "]");
+  jsonFlush(c);
+}
+
 // Update cached derived values (called when sensor values change)
 static void updateCachedDerived() {
   cached_slp = seaLevelPressure_hPa(p_raw_hpa, t_raw, ALTITUDE_M);
@@ -465,6 +553,43 @@ static void sendJSONGasHourly(WiFiClient &c) {
   c.print(",\"series\":"); jsonWriteSeries(c, gasSeries_hourly, 2);
   c.println("}");
 }
+
+// 24h downsampled endpoints (1-minute bins cached from SD)
+static void sendJSON24hSeries(WiFiClient &c, const RingS16 &series, const char* unit, int decimals) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  if (!downsample24h_ready || series.count == 0 || !series.buf) {
+    c.print("{\"ok\":false,\"error\":\"24h cache not ready\"}");
+    return;
+  }
+
+  c.print("{\"ok\":true,\"unit\":\""); c.print(unit); c.print("\",");
+  c.print("\"interval_ms\":60000");
+  if (downsample24h_start_ms > 0) {
+    char buf[32];
+    u64ToStr(downsample24h_start_ms, buf, sizeof(buf));
+    c.print(",\"start_ms\":"); c.print(buf);
+  }
+  if (downsample24h_end_ms > 0) {
+    char buf[32];
+    u64ToStr(downsample24h_end_ms, buf, sizeof(buf));
+    c.print(",\"end_ms\":"); c.print(buf);
+  }
+  if (downsample24h_source[0] != '\0') {
+    c.print(",\"source_date\":\""); c.print(downsample24h_source); c.print("\"");
+  }
+  c.print(",\"series\":"); jsonWriteSeriesScaled(c, series, decimals);
+  c.println("}");
+}
+
+static void sendJSONTemp24h(WiFiClient &c)    { sendJSON24hSeries(c, tempSeries_24h, "C", 2); }
+static void sendJSONHumidity24h(WiFiClient &c){ sendJSON24hSeries(c, humSeries_24h, "%", 2); }
+static void sendJSONPressure24h(WiFiClient &c){ sendJSON24hSeries(c, pressSeries_24h, "hPa", 1); }
+static void sendJSONGas24h(WiFiClient &c)     { sendJSON24hSeries(c, gasSeries_24h, "kOhm", 1); }
 
 static void sendJSONSummary(WiFiClient &c) {
   // Use cached derived values instead of recomputing
@@ -743,6 +868,10 @@ static void sendJSONStats(WiFiClient &c) {
   c.print("\"press_count\":"); c.print(pressSeries.count); c.print(",");
   c.print("\"gas_count\":"); c.print(gasSeries.count); c.print(",");
   c.print("\"slp_count\":"); c.print(slpTrend.count); c.print(",");
+  c.print("\"temp_24h_count\":"); c.print(tempSeries_24h.count); c.print(",");
+  c.print("\"hum_24h_count\":"); c.print(humSeries_24h.count); c.print(",");
+  c.print("\"press_24h_count\":"); c.print(pressSeries_24h.count); c.print(",");
+  c.print("\"gas_24h_count\":"); c.print(gasSeries_24h.count); c.print(",");
   c.print("\"total_samples\":"); c.print(tempSeries.count + gasSeries.count);
   c.print("},");
 
@@ -966,6 +1095,230 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
   c.println("]}");
 }
 
+// ============ 24H DOWNSAMPLED CACHE (1-MINUTE BINS) ============
+// Find the most recent YYYY-MM-DD.csv file (alphabetically latest)
+static bool findLatestDailyCSV(char* filename, size_t len) {
+  SdFile root;
+  if (!root.open("/")) return false;
+
+  SdFile file;
+  char best[16] = "";
+
+  while (file.openNext(&root, O_RDONLY)) {
+    char name[32];
+    file.getName(name, sizeof(name));
+    file.close();
+
+    if (strlen(name) == 14 && name[4] == '-' && name[7] == '-' &&
+        name[10] == '.' && name[11] == 'c' && name[12] == 's' && name[13] == 'v') {
+      if (best[0] == '\0' || strcmp(name, best) > 0) {
+        strncpy(best, name, sizeof(best) - 1);
+        best[sizeof(best) - 1] = '\0';
+      }
+    }
+  }
+  root.close();
+
+  if (best[0] == '\0') return false;
+  strncpy(filename, best, len - 1);
+  filename[len - 1] = '\0';
+  return true;
+}
+
+// Pick today's file if present, otherwise fall back to most recent CSV
+static bool selectDownsampleSource(char* filename, size_t len) {
+  char dateStr[16];
+  getCurrentDateString(dateStr, sizeof(dateStr));
+  snprintf(filename, len, "%s.csv", dateStr);
+  if (sd.exists(filename)) return true;
+  return findLatestDailyCSV(filename, len);
+}
+
+static void flushMinuteBucket(uint64_t bucketMinute,
+                              float tempSum, int tempCount,
+                              float humSum, int humCount,
+                              float pressSum, int pressCount,
+                              float gasSum, int gasCount) {
+  if (bucketMinute == UINT64_MAX) return;
+  if ((tempCount + humCount + pressCount + gasCount) == 0) return;
+
+  float tempAvg = tempCount ? tempSum / (float)tempCount : NAN;
+  float humAvg = humCount ? humSum / (float)humCount : NAN;
+  float pressAvg = pressCount ? pressSum / (float)pressCount : NAN;
+  float gasAvg = gasCount ? gasSum / (float)gasCount : NAN;
+
+  tempSeries_24h.pushFloat(tempAvg);
+  humSeries_24h.pushFloat(humAvg);
+  pressSeries_24h.pushFloat(pressAvg);
+  gasSeries_24h.pushFloat(gasAvg);
+
+  uint64_t bucketStartMs = bucketMinute * 60000ULL;
+  if (downsample24h_start_ms == 0) downsample24h_start_ms = bucketStartMs;
+  downsample24h_end_ms = bucketStartMs + 60000ULL;
+}
+
+// Rebuild the 24h cache from the latest per-day CSV file
+static bool rebuild24hCacheFromSD() {
+  if (!sd_info.initialized) return false;
+  if (!tempSeries_24h.buf || !humSeries_24h.buf || !pressSeries_24h.buf || !gasSeries_24h.buf) {
+    Serial.println("[24h] Skipping rebuild - buffers not allocated");
+    return false;
+  }
+
+  char filename[32];
+  if (!selectDownsampleSource(filename, sizeof(filename))) {
+    downsample24h_ready = false;
+    downsample24h_start_ms = 0;
+    downsample24h_end_ms = 0;
+    downsample24h_source[0] = '\0';
+    tempSeries_24h.reset();
+    humSeries_24h.reset();
+    pressSeries_24h.reset();
+    gasSeries_24h.reset();
+    return false;
+  }
+
+  SdFile file;
+  if (!file.open(filename, O_RDONLY)) {
+    downsample24h_ready = false;
+    downsample24h_start_ms = 0;
+    downsample24h_end_ms = 0;
+    downsample24h_source[0] = '\0';
+    tempSeries_24h.reset();
+    humSeries_24h.reset();
+    pressSeries_24h.reset();
+    gasSeries_24h.reset();
+    return false;
+  }
+
+  tempSeries_24h.reset();
+  humSeries_24h.reset();
+  pressSeries_24h.reset();
+  gasSeries_24h.reset();
+  downsample24h_start_ms = 0;
+  downsample24h_end_ms = 0;
+  strncpy(downsample24h_source, filename, 10);
+  downsample24h_source[10] = '\0';
+
+  uint64_t currentBucket = UINT64_MAX;
+  float tempSum = 0, humSum = 0, pressSum = 0, gasSum = 0;
+  int tempCount = 0, humCount = 0, pressCount = 0, gasCount = 0;
+  char line[160];
+  int line_len = 0;
+  bool first_line = true;
+  uint32_t linesProcessed = 0;
+
+  while (file.available()) {
+    int c = file.read();
+
+    if (c == '\n' || c == -1) {
+      if (line_len > 0) {
+        line[line_len] = '\0';
+
+        // Skip header
+        if (first_line) {
+          first_line = false;
+          if (line[0] < '0' || line[0] > '9') {
+            line_len = 0;
+            if (c == -1) break;
+            continue;
+          }
+        }
+
+        uint64_t ts = 0;
+        float temp = NAN, hum = NAN, press_station = NAN, press_slp = NAN, gas = NAN;
+        int field = 0;
+        int start = 0;
+        char field_str[32];
+        int parsed = 0;
+
+        for (int i = 0; i <= line_len; i++) {
+          if (line[i] == ',' || line[i] == '\0') {
+            int len = i - start;
+            if (len > 0 && len < (int)sizeof(field_str)) {
+              strncpy(field_str, &line[start], len);
+              field_str[len] = '\0';
+
+              switch (field) {
+                case 0: ts = strtoull(field_str, NULL, 10); parsed++; break;
+                case 1: temp = strtof(field_str, NULL); parsed++; break;
+                case 2: hum = strtof(field_str, NULL); parsed++; break;
+                case 3: press_station = strtof(field_str, NULL); parsed++; break;
+                case 4: press_slp = strtof(field_str, NULL); parsed++; break;
+                case 9: gas = strtof(field_str, NULL); parsed++; break;
+              }
+            }
+            field++;
+            start = i + 1;
+          }
+        }
+
+        if (field == 5) {  // old format: gas stored as 5th field
+          gas = press_slp;
+          press_slp = press_station;
+        }
+
+        if (parsed >= 2 && ts > 0) {
+          uint64_t bucket = ts / 60000ULL;
+          if (currentBucket == UINT64_MAX) {
+            currentBucket = bucket;
+          } else if (bucket != currentBucket) {
+            flushMinuteBucket(currentBucket, tempSum, tempCount, humSum, humCount, pressSum, pressCount, gasSum, gasCount);
+            tempSum = humSum = pressSum = gasSum = 0;
+            tempCount = humCount = pressCount = gasCount = 0;
+            currentBucket = bucket;
+          }
+
+          if (isfinite(temp)) { tempSum += temp; tempCount++; }
+          if (isfinite(hum)) { humSum += hum; humCount++; }
+          if (isfinite(press_station)) { pressSum += press_station; pressCount++; }
+          if (isfinite(gas)) { gasSum += gas; gasCount++; }
+        }
+
+        linesProcessed++;
+        if ((linesProcessed & 0xFF) == 0) {
+          // Yield to avoid watchdogs while processing large files
+          delay(1);
+          if (tempSeries_24h.count >= tempSeries_24h.size &&
+              humSeries_24h.count >= humSeries_24h.size &&
+              pressSeries_24h.count >= pressSeries_24h.size &&
+              gasSeries_24h.count >= gasSeries_24h.size) {
+            break;  // Filled buffers; no need to scan rest of file
+          }
+        }
+      }
+
+      line_len = 0;
+      if (c == -1) break;
+    } else if (c >= 32 && c < 127) {
+      if (line_len < (int)sizeof(line) - 1) {
+        line[line_len++] = c;
+      }
+    }
+  }
+
+  flushMinuteBucket(currentBucket, tempSum, tempCount, humSum, humCount, pressSum, pressCount, gasSum, gasCount);
+  file.close();
+
+  downsample24h_ready = tempSeries_24h.count > 0 ||
+                        humSeries_24h.count > 0 ||
+                        pressSeries_24h.count > 0 ||
+                        gasSeries_24h.count > 0;
+
+  if (downsample24h_ready) {
+    Serial.print("[24h] Cached from ");
+    Serial.print(filename);
+    Serial.print(" (");
+    Serial.print(tempSeries_24h.count);
+    Serial.println(" minute bins)");
+  } else {
+    Serial.print("[24h] No data found in ");
+    Serial.println(filename);
+  }
+
+  return downsample24h_ready;
+}
+
 // ============ LOAD HISTORY FROM CSV (implementation) ============
 // Helper to load and parse a single CSV file
 static uint32_t loadCSVFile(const char* filename,
@@ -1161,6 +1514,10 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
   // List all available CSV files
   listCSVFiles();
 
+  // Prime 24h cache using the latest available CSV
+  rebuild24hCacheFromSD();
+  last_24h_downsample_ms = millis();
+
   return true;
 }
 
@@ -1331,6 +1688,7 @@ void setup() {
 }
 
 void loop() {
+  uint32_t now = millis();
   updateSampling();
 
   // Check WiFi status and attempt reconnection if needed
@@ -1342,9 +1700,15 @@ void loop() {
     ntp_sync_successful = configureNTPTime();
   }
 
+  // Refresh 24h downsample cache once per hour
+  if (sd_initialized &&
+      (last_24h_downsample_ms == 0 || now - last_24h_downsample_ms >= HOURLY_SAMPLE_MS)) {
+    rebuild24hCacheFromSD();
+    last_24h_downsample_ms = now;
+  }
+
   // Calculate loop rate (update every second)
   loop_count++;
-  uint32_t now = millis();
   if (now - last_loop_rate_ms >= 1000) {
     loop_rate_hz = (float)loop_count * 1000.0f / (float)(now - last_loop_rate_ms);
     loop_count = 0;
@@ -1485,11 +1849,17 @@ void loop() {
       isError = true;
     }
     isApi = true;
+  } else if (reqLine.startsWith("GET /api/temp-24h")) {
+    sendJSONTemp24h(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/temp-hourly")) {
     sendJSONTempHourly(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/temp")) {
     sendJSONTemp(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/humidity-24h")) {
+    sendJSONHumidity24h(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/humidity-hourly")) {
     sendJSONHumidityHourly(client);
@@ -1497,11 +1867,17 @@ void loop() {
   } else if (reqLine.startsWith("GET /api/humidity")) {
     sendJSONHumidity(client);
     isApi = true;
+  } else if (reqLine.startsWith("GET /api/pressure-24h")) {
+    sendJSONPressure24h(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/pressure-hourly")) {
     sendJSONPressureHourly(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/pressure")) {
     sendJSONPressure(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/gas-24h")) {
+    sendJSONGas24h(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/gas-hourly")) {
     sendJSONGasHourly(client);
