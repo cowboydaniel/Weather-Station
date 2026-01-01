@@ -1212,16 +1212,23 @@ static bool configureNTPTime() {
   return true;
 }
 
-// Get current date as YYYY-MM-DD string (from RTC)
+// Get current date as YYYY-MM-DD string (from RTC, converted to local time)
 void getCurrentDateString(char* dateStr, int maxLen) {
   RTCTime currentTime;
   RTC.getTime(currentTime);
 
-  // Format: YYYY-MM-DD
+  // RTC stores UTC time. We need to convert to local time for the date.
+  // Get Unix timestamp from the RTC time using getUnixTime()
+  time_t utcTime = currentTime.getUnixTime();
+
+  // localtime() uses TZ environment variable (set during NTP sync)
+  struct tm* local = localtime(&utcTime);
+
+  // Format: YYYY-MM-DD using local time
   snprintf(dateStr, maxLen, "%04d-%02d-%02d",
-           currentTime.getYear(),
-           Month2int(currentTime.getMonth()),
-           currentTime.getDayOfMonth());
+           local->tm_year + 1900,
+           local->tm_mon + 1,
+           local->tm_mday);
 }
 
 // Get current timestamp in milliseconds (real clock time, not millis())
