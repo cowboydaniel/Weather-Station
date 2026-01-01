@@ -33,6 +33,13 @@ static void sendPagePressure(WiFiClient &client) {
       <div class="kpi">SLP now: <b id="slp">--</b></div>
       <div class="kpi">Tendency: <b id="tend">--</b></div>
       <div class="kpi">Slope: <b id="slope">--</b></div>
+      <div style="flex: 1;"></div>
+      <div class="kpi">
+        Date:
+        <select id="dateSelect" style="padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; font-size: 14px;">
+          <option value="">Today (Live)</option>
+        </select>
+      </div>
     </div>
 
     <div class="sep"></div>
@@ -48,8 +55,13 @@ static void sendPagePressure(WiFiClient &client) {
 <script>
 const station = setupCanvas('cv1', 260);
 const slpTrendChart = setupCanvas('cv2', 260);
+let selectedDate = '';
 
-function getChartEndpoint(baseEndpoint) {
+function getChartEndpoint(baseEndpoint, selectedDate) {
+  if (selectedDate) {
+    return baseEndpoint + '?date=' + encodeURIComponent(selectedDate);
+  }
+
   const saved = localStorage.getItem('weatherSettings');
   let graphSpan = 600; // default
   if (saved) {
@@ -66,9 +78,36 @@ function getChartEndpoint(baseEndpoint) {
   return baseEndpoint;
 }
 
+function loadAvailableDates() {
+  fetch('/api/available-dates?metric=pressure', {cache:'no-store'})
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok && Array.isArray(data.dates)) {
+        const select = $('dateSelect');
+        if (!select) return;
+
+        data.dates.forEach(date => {
+          const option = document.createElement('option');
+          option.value = date;
+          option.textContent = date;
+          select.appendChild(option);
+        });
+      }
+    })
+    .catch(e => console.log('Could not load dates:', e));
+}
+
+const dateSelect = $('dateSelect');
+if (dateSelect) {
+  dateSelect.addEventListener('change', (e) => {
+    selectedDate = e.target.value;
+    tick();
+  });
+}
+
 async function tick(){
   try{
-    const endpoint = getChartEndpoint('/api/pressure');
+    const endpoint = getChartEndpoint('/api/pressure', selectedDate);
     const r = await fetch(endpoint, {cache:'no-store'});
     const j = await r.json();
     if(!j.ok) return;
@@ -77,11 +116,12 @@ async function tick(){
     tend.textContent = j.tendency;
     slope.textContent = j.tendency_hpa_hr.toFixed(2) + " hPa/hr";
 
-    drawLineSeries(station.ctx, station.cv, j.station_series || [], {padFraction:0.15, minPad:0.2});
-    drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, j.slp_trend_series || [], {padFraction:0.15, minPad:0.2});
+    drawLineSeries(station.ctx, station.cv, j.station_series || [], {padFraction:0.15, minPad:0.2, interval_ms: j.interval_ms});
+    drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, j.slp_trend_series || [], {padFraction:0.15, minPad:0.2, interval_ms: j.slp_trend_interval_ms});
   }catch(e){}
 }
 tick(); setInterval(tick, 2000);  // 2s polling - data updates at 1Hz anyway
+loadAvailableDates();
 </script>
 </body></html>
 )HTML");

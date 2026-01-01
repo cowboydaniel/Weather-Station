@@ -521,6 +521,9 @@ function drawLineSeries(ctx, cv, series, opts={}){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
   }
 
+  // Draw X-axis ticks and labels based on interval
+  drawXAxisTicks(ctx, w, h, series.length, opts.interval_ms);
+
   ctx.lineWidth = 3;
   ctx.strokeStyle = 'rgba(255,255,255,0.88)';
   ctx.beginPath();
@@ -541,6 +544,58 @@ function drawLineSeries(ctx, cv, series, opts={}){
   return {min: dataMin, max: dataMax, last: data[data.length-1]};
 }
 
+function drawXAxisTicks(ctx, w, h, numPoints, interval_ms){
+  if (!interval_ms || numPoints < 2) return;
+
+  const HOURLY_MS = 3600000;
+  let tickCount, tickLabel;
+
+  if (interval_ms >= HOURLY_MS) {
+    // Hourly data: show hour ticks
+    tickCount = Math.min(numPoints - 1, 6);
+    tickLabel = (idx) => idx + 'h';
+  } else if (interval_ms >= 60000) {
+    // Minute-scale data: show minute ticks
+    const minutes = Math.round(numPoints * interval_ms / 60000);
+    tickCount = Math.min(Math.ceil(minutes / 5), 6);
+    tickLabel = (idx) => {
+      const totalMinutes = Math.round(numPoints * interval_ms / 60000);
+      const minPerTick = Math.max(1, Math.round(totalMinutes / tickCount));
+      return (idx * minPerTick) + 'm';
+    };
+  } else {
+    // Second-scale data: show second ticks
+    const seconds = Math.round(numPoints * interval_ms / 1000);
+    tickCount = Math.min(Math.ceil(seconds / 30), 6);
+    tickLabel = (idx) => {
+      const totalSeconds = Math.round(numPoints * interval_ms / 1000);
+      const secPerTick = Math.max(1, Math.round(totalSeconds / tickCount));
+      return (idx * secPerTick) + 's';
+    };
+  }
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+
+  for (let i = 0; i <= tickCount; i++) {
+    const x = (i / tickCount) * w;
+    // Draw tick mark
+    ctx.beginPath();
+    ctx.moveTo(x, h - 14);
+    ctx.lineTo(x, h - 8);
+    ctx.stroke();
+    // Draw label
+    ctx.fillText(tickLabel(i), x, h - 6);
+  }
+
+  ctx.restore();
+}
+
 function startSimpleSeriesPage(cfg){
   const nowEl = cfg.nowId ? $(cfg.nowId) : null;
   const minEl = cfg.minId ? $(cfg.minId) : null;
@@ -548,13 +603,16 @@ function startSimpleSeriesPage(cfg){
   const decimals = cfg.decimals ?? 1;
   const unit = cfg.unit || '';
   const chart = setupCanvas(cfg.canvasId, cfg.height || 360);
+  let lastInterval = null;
 
-  const render = (series) => {
+  const render = (series, interval_ms) => {
+    lastInterval = interval_ms;
     const stats = drawLineSeries(chart.ctx, chart.cv, series, {
       fixedMin: cfg.fixedMin,
       fixedMax: cfg.fixedMax,
       padFraction: cfg.padFraction,
-      minPad: cfg.minPad
+      minPad: cfg.minPad,
+      interval_ms: interval_ms
     });
     if (!stats) return;
     if (nowEl) nowEl.textContent = stats.last.toFixed(decimals) + unit;
@@ -567,7 +625,7 @@ function startSimpleSeriesPage(cfg){
       const r = await fetch(cfg.endpoint, {cache:'no-store'});
       const j = await r.json();
       if(!j.ok) return;
-      render(j.series || []);
+      render(j.series || [], j.interval_ms);
     }catch(e){}
   };
   tick();
