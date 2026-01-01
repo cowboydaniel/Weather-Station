@@ -120,6 +120,7 @@ function drawXAxisTicks(ctx, w, h, numPoints, interval_ms, timeMode, timestamps,
   if (!interval_ms || numPoints < 2) return;
 
   const HOURLY_MS = 3600000;
+  const MINUTE_MS = 60000;
   let tickCount, tickLabel;
 
   if (timeMode === 'absolute' && expectedDurationMs) {
@@ -134,29 +135,32 @@ function drawXAxisTicks(ctx, w, h, numPoints, interval_ms, timeMode, timestamps,
       const hours = Math.round(idx * hoursPerTick);
       return hours.toString().padStart(2, '0') + ':00';
     };
-  } else if (interval_ms >= HOURLY_MS) {
-    // Relative time for hourly data
-    tickCount = Math.min(numPoints - 1, 6);
-    tickLabel = (idx) => '-' + (tickCount - idx) + 'h';
-  } else if (interval_ms >= 60000) {
-    // Relative time for minute-scale data
-    const minutes = Math.round(numPoints * interval_ms / 60000);
-    tickCount = Math.min(Math.ceil(minutes / 5), 6);
-    tickLabel = (idx) => {
-      const totalMinutes = Math.round(numPoints * interval_ms / 60000);
-      const minPerTick = Math.max(1, Math.round(totalMinutes / tickCount));
-      return '-' + (tickCount - idx) * minPerTick + 'm';
-    };
   } else {
-    // Relative time for second-scale data
-    const seconds = Math.round(numPoints * interval_ms / 1000);
-    tickCount = Math.min(Math.ceil(seconds / 30), 6);
-    tickLabel = (idx) => {
-      const totalSeconds = Math.round(numPoints * interval_ms / 1000);
+    const durationMsForTicks = expectedDurationMs || (numPoints * interval_ms);
+
+    if (interval_ms >= HOURLY_MS) {
+      // Relative time for hourly data
+      const hours = Math.max(1, Math.round(durationMsForTicks / HOURLY_MS));
+      tickCount = Math.min(hours, 6);
+      const hoursPerTick = Math.max(1, Math.round(hours / tickCount));
+      tickLabel = (idx) => '-' + (tickCount - idx) * hoursPerTick + 'h';
+    } else if (interval_ms >= MINUTE_MS) {
+      // Relative time for minute-scale data
+      const totalMinutes = Math.max(1, Math.round(durationMsForTicks / MINUTE_MS));
+      tickCount = Math.min(Math.ceil(totalMinutes / 5), 6);
+      const minPerTick = Math.max(1, Math.round(totalMinutes / tickCount));
+      tickLabel = (idx) => '-' + (tickCount - idx) * minPerTick + 'm';
+    } else {
+      // Relative time for second-scale data
+      const totalSeconds = Math.max(1, Math.round(durationMsForTicks / 1000));
+      tickCount = Math.min(Math.ceil(totalSeconds / 30), 6);
       const secPerTick = Math.max(1, Math.round(totalSeconds / tickCount));
-      const secVal = (tickCount - idx) * secPerTick;
-      return '-' + secVal + 's';
-    };
+      tickLabel = (idx) => '-' + (tickCount - idx) * secPerTick + 's';
+    }
+  }
+
+  if (!tickLabel || !tickCount) {
+    return;
   }
 
   ctx.save();
