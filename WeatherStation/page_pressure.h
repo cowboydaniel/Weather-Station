@@ -44,7 +44,34 @@ static void sendPagePressure(WiFiClient &client) {
       </select>
       <span class="timeframe-label" style="margin-left: 16px;">Date:</span>
       <button id="datePickerBtn" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">Today (Live)</button>
-      <div id="calendarContainer" class="calendar-container"></div>
+    </div>
+
+    <!-- Calendar Modal Overlay -->
+    <div id="calendarModal" class="calendar-modal" style="display: none;">
+      <div class="calendar-modal-overlay"></div>
+      <div class="calendar-modal-content">
+        <div class="calendar-modal-header">
+          <h3>Select Date</h3>
+          <button id="calendarCloseBtn" class="calendar-modal-close">&times;</button>
+        </div>
+        <div class="calendar-widget-container">
+          <div class="calendar-nav-row">
+            <button class="calendar-nav-btn" id="prevMonth" aria-label="Previous month">‹</button>
+            <div class="calendar-month-year" id="monthYear">January 2026</div>
+            <button class="calendar-nav-btn" id="nextMonth" aria-label="Next month">›</button>
+          </div>
+          <div class="calendar-weekdays">
+            <div class="calendar-weekday-label">Sun</div>
+            <div class="calendar-weekday-label">Mon</div>
+            <div class="calendar-weekday-label">Tue</div>
+            <div class="calendar-weekday-label">Wed</div>
+            <div class="calendar-weekday-label">Thu</div>
+            <div class="calendar-weekday-label">Fri</div>
+            <div class="calendar-weekday-label">Sat</div>
+          </div>
+          <div class="calendar-days" id="calendarDays"></div>
+        </div>
+      </div>
     </div>
 
     <div class="sep"></div>
@@ -84,91 +111,79 @@ function getChartEndpoint(baseEndpoint, selectedDate, timeframe) {
   return baseEndpoint;
 }
 
-function renderCalendar() {
-  const container = $('calendarContainer');
-  if (!container) return;
-
-  const today = new Date();
+function renderCalendarDays() {
   const year = pageState.calendarYear;
   const month = pageState.calendarMonth;
+  const today = new Date();
 
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const daysInMonth = lastDay.getDate();
-  const startingDayOfWeek = firstDay.getDay();
+  const firstDay = new Date(year, month, 1).getDay();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const prevMonthLastDay = new Date(year, month, 0).getDate();
 
-  let html = '<div class="calendar-header">';
-  html += '<div class="calendar-nav">';
-  html += '<button data-action="prev-month">&lt;</button>';
-  html += '</div>';
-  html += '<div>' + firstDay.toLocaleDateString('en-US', {month: 'short', year: 'numeric'}) + '</div>';
-  html += '<div class="calendar-nav">';
-  html += '<button data-action="next-month">&gt;</button>';
-  html += '</div>';
-  html += '</div>';
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  $('monthYear').textContent = monthNames[month] + ' ' + year;
 
-  html += '<div class="calendar-dates">';
-  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  for (let i = 0; i < 7; i++) {
-    html += '<div class="calendar-weekday">' + weekdays[i] + '</div>';
+  const calendarDaysEl = $('calendarDays');
+  calendarDaysEl.innerHTML = '';
+
+  // Previous month's days
+  for (let i = firstDay - 1; i >= 0; i--) {
+    const day = prevMonthLastDay - i;
+    const el = document.createElement('div');
+    el.className = 'calendar-day other-month';
+    el.textContent = day;
+    calendarDaysEl.appendChild(el);
   }
 
-  for (let i = 0; i < startingDayOfWeek; i++) {
-    html += '<div class="calendar-date disabled"></div>';
-  }
-
+  // Current month's days
   const today_str = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
 
-  for (let day = 1; day <= daysInMonth; day++) {
+  for (let day = 1; day <= lastDay; day++) {
     const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
     const hasData = pageState.availableDates.includes(dateStr) || dateStr === today_str;
-    const isActive = dateStr === pageState.selectedDate || (pageState.selectedDate === '' && dateStr === today_str);
+    const isToday = dateStr === today_str;
 
-    html += '<div class="calendar-date' + (hasData ? ' has-data' : '') + (isActive ? ' active' : '') + '" data-date="' + dateStr + '">' + day + '</div>';
+    const el = document.createElement('div');
+    el.className = 'calendar-day';
+    if (isToday) el.classList.add('today');
+    if (!hasData) el.classList.add('no-data');
+    el.textContent = day;
+    el.dataset.date = dateStr;
+
+    if (hasData) {
+      el.addEventListener('click', (e) => {
+        pageState.selectedDate = dateStr;
+        $('datePickerBtn').textContent = dateStr;
+        closeCalendarModal();
+        tick();
+      });
+      el.style.cursor = 'pointer';
+    }
+
+    calendarDaysEl.appendChild(el);
   }
 
-  html += '</div>';
-  container.innerHTML = html;
-
-  container.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      if (e.target.dataset.action === 'prev-month') {
-        pageState.calendarMonth--;
-        if (pageState.calendarMonth < 0) {
-          pageState.calendarMonth = 11;
-          pageState.calendarYear--;
-        }
-      } else if (e.target.dataset.action === 'next-month') {
-        pageState.calendarMonth++;
-        if (pageState.calendarMonth > 11) {
-          pageState.calendarMonth = 0;
-          pageState.calendarYear++;
-        }
-      }
-      renderCalendar();
-    });
-  });
-
-  container.querySelectorAll('[data-date]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      pageState.selectedDate = e.target.dataset.date;
-      renderCalendar();
-      $('datePickerBtn').textContent = pageState.selectedDate;
-      tick();
-    });
-  });
+  // Next month's days
+  const totalCells = calendarDaysEl.children.length;
+  const remainingCells = (7 - (totalCells % 7)) % 7;
+  for (let day = 1; day <= remainingCells; day++) {
+    const el = document.createElement('div');
+    el.className = 'calendar-day other-month';
+    el.textContent = day;
+    calendarDaysEl.appendChild(el);
+  }
 }
 
-function toggleCalendar() {
-  const container = $('calendarContainer');
-  if (container) {
-    if (pageState.selectedTimeframe === 86400) {
-      renderCalendar();
-      container.classList.toggle('visible');
-    } else {
-      container.classList.remove('visible');
-    }
+function openCalendarModal() {
+  if (pageState.selectedTimeframe !== 86400) {
+    return;
   }
+  $('calendarModal').style.display = 'flex';
+  renderCalendarDays();
+}
+
+function closeCalendarModal() {
+  $('calendarModal').style.display = 'none';
 }
 
 function loadAvailableDates() {
@@ -177,14 +192,48 @@ function loadAvailableDates() {
     .then(data => {
       if (data.ok && Array.isArray(data.dates)) {
         pageState.availableDates = data.dates;
-        if (pageState.selectedTimeframe === 86400) {
-          renderCalendar();
-        }
       }
     })
     .catch(e => console.log('Could not load dates:', e));
 }
 
+// Modal event listeners
+const calendarModal = $('calendarModal');
+const prevMonthBtn = $('prevMonth');
+const nextMonthBtn = $('nextMonth');
+const closeBtn = $('calendarCloseBtn');
+
+if (prevMonthBtn) {
+  prevMonthBtn.addEventListener('click', () => {
+    pageState.calendarMonth--;
+    if (pageState.calendarMonth < 0) {
+      pageState.calendarMonth = 11;
+      pageState.calendarYear--;
+    }
+    renderCalendarDays();
+  });
+}
+
+if (nextMonthBtn) {
+  nextMonthBtn.addEventListener('click', () => {
+    pageState.calendarMonth++;
+    if (pageState.calendarMonth > 11) {
+      pageState.calendarMonth = 0;
+      pageState.calendarYear++;
+    }
+    renderCalendarDays();
+  });
+}
+
+if (closeBtn) {
+  closeBtn.addEventListener('click', closeCalendarModal);
+}
+
+if (calendarModal) {
+  calendarModal.querySelector('.calendar-modal-overlay').addEventListener('click', closeCalendarModal);
+}
+
+// Timeframe select listener
 const timeframeSelect = $('timeframeSelect');
 if (timeframeSelect) {
   const saved = localStorage.getItem('pressureGraphSpan');
@@ -198,14 +247,17 @@ if (timeframeSelect) {
     localStorage.setItem('pressureGraphSpan', pageState.selectedTimeframe);
     pageState.selectedDate = '';
     $('datePickerBtn').textContent = 'Today (Live)';
-    toggleCalendar();
+    if (pageState.selectedTimeframe !== 86400) {
+      closeCalendarModal();
+    }
     tick();
   });
 }
 
+// Date picker button listener
 const datePickerBtn = $('datePickerBtn');
 if (datePickerBtn) {
-  datePickerBtn.addEventListener('click', toggleCalendar);
+  datePickerBtn.addEventListener('click', openCalendarModal);
 }
 
 async function tick(){
@@ -226,7 +278,6 @@ async function tick(){
 let pressureIntervalId;
 tick();
 pressureIntervalId = setInterval(tick, 2000);
-toggleCalendar();
 loadAvailableDates();
 </script>
 </body></html>
