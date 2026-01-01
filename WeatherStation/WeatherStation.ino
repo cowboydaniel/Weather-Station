@@ -1191,15 +1191,16 @@ static unsigned long getCurrentTimeMs() {
   RTC.getTime(currentTime);
 
   // Convert RTCTime to Unix timestamp
-  struct tm tm_info = {
-    .tm_sec = currentTime.getSeconds(),
-    .tm_min = currentTime.getMinutes(),
-    .tm_hour = currentTime.getHour(),
-    .tm_mday = currentTime.getDayOfMonth(),
-    .tm_mon = Month2int(currentTime.getMonth()) - 1,  // tm_mon is 0-11
-    .tm_year = currentTime.getYear() - 1900,  // tm_year is years since 1900
-    .tm_isdst = -1  // Let mktime determine DST
-  };
+  struct tm tm_info;
+  memset(&tm_info, 0, sizeof(struct tm));
+
+  tm_info.tm_sec = currentTime.getSeconds();
+  tm_info.tm_min = currentTime.getMinutes();
+  tm_info.tm_hour = currentTime.getHour();
+  tm_info.tm_mday = currentTime.getDayOfMonth();
+  tm_info.tm_mon = Month2int(currentTime.getMonth()) - 1;  // tm_mon is 0-11
+  tm_info.tm_year = currentTime.getYear() - 1900;  // tm_year is years since 1900
+  tm_info.tm_isdst = -1;  // Let mktime determine DST
 
   time_t unixTime = mktime(&tm_info);
   return (unsigned long)unixTime * 1000;  // Convert seconds to milliseconds
