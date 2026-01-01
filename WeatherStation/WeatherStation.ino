@@ -24,7 +24,7 @@
 #include "static_assets.h"
 
 // ================= USER CONFIG =================
-const char ssid[] = "outback_hut";
+const char ssid[] = "outbackhut";
 const char pass[] = "wildmonkeys2810";
 const char device_name[] = "weather-station";  // Device name for WiFi network
 const float ALTITUDE_M = 242.0f;
