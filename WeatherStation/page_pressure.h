@@ -177,7 +177,9 @@ function loadAvailableDates() {
     .then(data => {
       if (data.ok && Array.isArray(data.dates)) {
         pageState.availableDates = data.dates;
-        renderCalendar();
+        if (pageState.selectedTimeframe === 86400) {
+          renderCalendar();
+        }
       }
     })
     .catch(e => console.log('Could not load dates:', e));
