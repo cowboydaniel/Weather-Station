@@ -58,8 +58,7 @@ function getChartEndpoint(baseEndpoint) {
   return baseEndpoint;
 }
 
-startSimpleSeriesPage({
-  endpoint: getChartEndpoint('/api/humidity'),
+const cfg = {
   canvasId:'cv',
   unit:' %',
   decimals:1,
@@ -72,7 +71,36 @@ startSimpleSeriesPage({
   nowId:'now',
   minId:'minv',
   maxId:'maxv'
-});
+};
+
+const $ = (id) => document.getElementById(id);
+const chart = setupCanvas(cfg.canvasId, cfg.height || 360);
+
+const render = (series) => {
+  const stats = drawLineSeries(chart.ctx, chart.cv, series, {
+    fixedMin: cfg.fixedMin,
+    fixedMax: cfg.fixedMax,
+    padFraction: cfg.padFraction,
+    minPad: cfg.minPad
+  });
+  if (!stats) return;
+  if (cfg.nowId) $(cfg.nowId).textContent = stats.last.toFixed(cfg.decimals) + cfg.unit;
+  if (cfg.minId) $(cfg.minId).textContent = stats.min.toFixed(cfg.decimals) + cfg.unit;
+  if (cfg.maxId) $(cfg.maxId).textContent = stats.max.toFixed(cfg.decimals) + cfg.unit;
+};
+
+const tick = async () => {
+  try {
+    const endpoint = getChartEndpoint('/api/humidity');
+    const res = await fetch(endpoint, { cache: 'no-store' });
+    const data = await res.json();
+    if (!data.ok) return;
+    render(data.series || []);
+  } catch (e) {}
+};
+
+tick();
+setInterval(tick, cfg.pollMs);
 </script>
 </body></html>
 )HTML");
