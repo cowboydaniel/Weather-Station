@@ -1270,9 +1270,15 @@ void setup() {
     sd_initialized = true;
 
     // Check for required static asset files
-    bool has_css = SD.exists("app.css");
-    bool has_js = SD.exists("app.js");
-    bool has_favicon = SD.exists("favicon.svg");
+    SdFile test_file;
+    bool has_css = test_file.open("app.css", O_RDONLY);
+    if (has_css) test_file.close();
+
+    bool has_js = test_file.open("app.js", O_RDONLY);
+    if (has_js) test_file.close();
+
+    bool has_favicon = test_file.open("favicon.svg", O_RDONLY);
+    if (has_favicon) test_file.close();
 
     if (!has_css || !has_js || !has_favicon) {
       Serial.println("ERROR: Missing required static files on SD card!");
