@@ -23,7 +23,7 @@ static void sendPageHumidity(WiFiClient &client) {
   <div class="top">
     <div>
       <h1>Humidity</h1>
-      <div class="sub">24-hour history (or less if device recently started), 1 sample per second</div>
+      <div class="sub">10-minute live buffer, or select 24hr for historical data from SD card</div>
     </div>
     <a class="kpi" href="/">Back</a>
   </div>

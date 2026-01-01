@@ -23,7 +23,7 @@ static void sendPagePressure(WiFiClient &client) {
   <div class="top">
     <div>
       <h1>Pressure</h1>
-      <div class="sub">Station pressure (24hr or less, 1 Hz) and sea-level pressure trend (60 min, 1/min)</div>
+      <div class="sub">Station pressure (10-min live or 24hr from SD card) and trend (60-min live)</div>
     </div>
     <a class="kpi" href="/">Back</a>
   </div>
