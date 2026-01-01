@@ -1268,8 +1268,31 @@ void setup() {
     // Load historical data from CSV into ring buffers
     loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
     sd_initialized = true;
+
+    // Check for required static asset files
+    bool has_css = SD.exists("app.css");
+    bool has_js = SD.exists("app.js");
+    bool has_favicon = SD.exists("favicon.svg");
+
+    if (!has_css || !has_js || !has_favicon) {
+      Serial.println("ERROR: Missing required static files on SD card!");
+      if (!has_css) Serial.println("  - app.css is missing");
+      if (!has_js) Serial.println("  - app.js is missing");
+      if (!has_favicon) Serial.println("  - favicon.svg is missing");
+      Serial.println("Please copy app.css, app.js, and favicon.svg to SD card root");
+      Serial.println("Web server will NOT start until files are present");
+      while (1) {
+        delay(1000);
+        Serial.println("Waiting for static files...");
+      }
+    }
   } else {
-    Serial.println("WARNING: SD card initialization failed, but web server will continue");
+    Serial.println("ERROR: SD card initialization failed!");
+    Serial.println("Cannot start web server without SD card");
+    while (1) {
+      delay(1000);
+      Serial.println("Waiting for SD card...");
+    }
   }
 
   server.begin();
