@@ -35,8 +35,12 @@ static void sendPageTemp(WiFiClient &client) {
     <div class="timeframe-selector">
       <span class="timeframe-label">Time span:</span>
       <select id="timeframeSelect">
+        <option value="60">1 minute</option>
+        <option value="300">5 minutes</option>
         <option value="600" selected>10 minutes</option>
+        <option value="86400">24 hours</option>
       </select>
+      <button id="datePickerBtn" style="display: none; margin-left: 12px; padding: 6px 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: rgba(255,255,255,0.8); font-size: 14px; cursor: pointer;">Today (Live)</button>
     </div>
     <div style="margin-top:12px">
       <canvas id="cv" class="chart chart-lg" width="1000" height="360"></canvas>
@@ -66,9 +70,7 @@ function getChartEndpoint(baseEndpoint, selectedDate, timeframe) {
   if (selectedDate) {
     return baseEndpoint + '-date?date=' + encodeURIComponent(selectedDate);
   }
-  if (timeframe > 600) {
-    return baseEndpoint + '-hourly';
-  }
+  // Always use base endpoint for real-time (never use -hourly which has insufficient data)
   return baseEndpoint;
 }
 
@@ -166,7 +168,7 @@ function recreatePage() {
   if (pageState.page && pageState.page.intervalId) {
     clearInterval(pageState.page.intervalId);
   }
-  pageState.page = startSimpleSeriesPage({
+  const page = startSimpleSeriesPage({
     endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate, pageState.selectedTimeframe),
     canvasId:'cv',
     unit:' °C',
@@ -180,6 +182,22 @@ function recreatePage() {
     minId:'minv',
     maxId:'maxv'
   });
+
+  // Wrap render to slice data for timeframes < 10 minutes
+  const originalRender = page.render;
+  page.render = function(series, interval_ms, timeMode, timestamps) {
+    if (pageState.selectedTimeframe < 600 && !pageState.selectedDate) {
+      // Slice to the requested timeframe
+      const pointsToShow = Math.ceil(pageState.selectedTimeframe);
+      series = series.slice(-pointsToShow);
+      if (Array.isArray(timestamps)) {
+        timestamps = timestamps.slice(-pointsToShow);
+      }
+    }
+    return originalRender.call(this, series, interval_ms, timeMode, timestamps);
+  };
+
+  pageState.page = page;
 }
 
 // Modal event listeners
@@ -237,9 +255,14 @@ if (timeframeSelect) {
   timeframeSelect.addEventListener('change', (e) => {
     pageState.selectedTimeframe = parseInt(e.target.value, 10);
     localStorage.setItem('tempGraphSpan', pageState.selectedTimeframe);
-    pageState.selectedDate = '';
-    $('datePickerBtn').textContent = 'Today (Live)';
-    if (pageState.selectedTimeframe !== 86400) {
+
+    const datePickerBtn = $('datePickerBtn');
+    if (pageState.selectedTimeframe === 86400) {
+      datePickerBtn.style.display = 'inline-block';
+      openCalendarModal();
+    } else {
+      datePickerBtn.style.display = 'none';
+      pageState.selectedDate = '';
       closeCalendarModal();
     }
     recreatePage();

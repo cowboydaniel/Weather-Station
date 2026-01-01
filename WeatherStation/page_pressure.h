@@ -35,8 +35,12 @@ static void sendPagePressure(WiFiClient &client) {
     <div class="timeframe-selector">
       <span class="timeframe-label">Time span:</span>
       <select id="timeframeSelect">
+        <option value="60">1 minute</option>
+        <option value="300">5 minutes</option>
         <option value="600" selected>10 minutes</option>
+        <option value="86400">24 hours</option>
       </select>
+      <button id="datePickerBtn" style="display: none; margin-left: 12px; padding: 6px 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: rgba(255,255,255,0.8); font-size: 14px; cursor: pointer;">Today (Live)</button>
     </div>
     <div class="sep"></div>
     <div class="sub">Station pressure (hPa)</div>
@@ -69,9 +73,7 @@ function getChartEndpoint(baseEndpoint, selectedDate, timeframe) {
   if (selectedDate) {
     return baseEndpoint + '-date?date=' + encodeURIComponent(selectedDate);
   }
-  if (timeframe > 600) {
-    return baseEndpoint + '-hourly';
-  }
+  // Always use base endpoint for real-time (never use -hourly which has insufficient data)
   return baseEndpoint;
 }
 
@@ -220,9 +222,14 @@ if (timeframeSelect) {
   timeframeSelect.addEventListener('change', (e) => {
     pageState.selectedTimeframe = parseInt(e.target.value, 10);
     localStorage.setItem('pressureGraphSpan', pageState.selectedTimeframe);
-    pageState.selectedDate = '';
-    $('datePickerBtn').textContent = 'Today (Live)';
-    if (pageState.selectedTimeframe !== 86400) {
+
+    const datePickerBtn = $('datePickerBtn');
+    if (pageState.selectedTimeframe === 86400) {
+      datePickerBtn.style.display = 'inline-block';
+      openCalendarModal();
+    } else {
+      datePickerBtn.style.display = 'none';
+      pageState.selectedDate = '';
       closeCalendarModal();
     }
     tick();
@@ -246,8 +253,17 @@ async function tick(){
     tend.textContent = j.tendency;
     slope.textContent = j.tendency_hpa_hr.toFixed(2) + " hPa/hr";
 
-    drawLineSeries(station.ctx, station.cv, j.station_series || [], {padFraction:0.15, minPad:0.2, interval_ms: j.interval_ms});
-    drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, j.slp_trend_series || [], {padFraction:0.15, minPad:0.2, interval_ms: j.slp_trend_interval_ms});
+    // Slice data for timeframes < 10 minutes (real-time only)
+    let stationSeries = j.station_series || [];
+    let slpTrendSeries = j.slp_trend_series || [];
+    if (pageState.selectedTimeframe < 600 && !pageState.selectedDate) {
+      const pointsToShow = Math.ceil(pageState.selectedTimeframe);
+      stationSeries = stationSeries.slice(-pointsToShow);
+      slpTrendSeries = slpTrendSeries.slice(-pointsToShow);
+    }
+
+    drawLineSeries(station.ctx, station.cv, stationSeries, {padFraction:0.15, minPad:0.2, interval_ms: j.interval_ms});
+    drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, slpTrendSeries, {padFraction:0.15, minPad:0.2, interval_ms: j.slp_trend_interval_ms});
   }catch(e){}
 }
 let pressureIntervalId;
