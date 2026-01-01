@@ -68,6 +68,16 @@ static void sendPageGraphs(WiFiClient &client, const char* timeframe, int timefr
   color: rgba(255,255,255,0.85);
   font-weight: 500;
 }
+.graph-warning {
+  display: none;
+  margin: 0 0 12px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 165, 0, 0.12);
+  color: rgba(255, 215, 0, 0.9);
+  font-size: 13px;
+  border: 1px solid rgba(255, 165, 0, 0.35);
+}
 </style>
 </head>
 <body class="page-chart" style="--bg-layer: radial-gradient(1200px 700px at 15% 10%, rgba(110,160,255,0.22), transparent 60%), radial-gradient(900px 600px at 85% 25%, rgba(255,110,180,0.18), transparent 55%), var(--bg); --wrap-max:1000px; --wrap-pad:22px 14px 30px;">
@@ -86,6 +96,8 @@ static void sendPageGraphs(WiFiClient &client, const char* timeframe, int timefr
     <a href="/graphs/10m" id="nav-10m">10 min</a>
     <a href="/graphs/24h" id="nav-24h">24 hours</a>
   </nav>
+
+  <div id="graphWarning" class="graph-warning"></div>
 
   <div class="card">
     <div class="graph-section">
@@ -149,6 +161,7 @@ static void sendPageGraphs(WiFiClient &client, const char* timeframe, int timefr
   // Continue with JavaScript
   client.println(R"HTML(
 const USE_DATE_API = TIMEFRAME >= 86400;
+const warningEl = document.getElementById('graphWarning');
 
 // Set active nav and subtitle
 document.getElementById('nav-' + TIMEFRAME_ID).classList.add('active');
@@ -187,6 +200,82 @@ function sliceSeries(series, intervalMs) {
   return sliced;
 }
 
+function normalizeMetricData(metric, mode, data) {
+  if (!data || !data.ok) return null;
+
+  if (mode === 'date') {
+    if (Array.isArray(data.data) && data.data.length) {
+      return {
+        series: data.data.map(d => d[1]),
+        timestamps: data.data.map(d => d[0]),
+        interval_ms: data.interval_ms,
+        timeMode: 'absolute',
+        expectedDurationMs: 86400000
+      };
+    }
+    return null;
+  }
+
+  const series = Array.isArray(data.series) ? data.series :
+    (Array.isArray(data.station_series) ? data.station_series : null);
+
+  if (series && series.length) {
+    const trimmed = (mode === 'live') ? sliceSeries(series, data.interval_ms) : series;
+    return {
+      series: trimmed,
+      timestamps: null,
+      interval_ms: data.interval_ms,
+      timeMode: null,
+      expectedDurationMs: TIMEFRAME * 1000
+    };
+  }
+
+  return null;
+}
+
+async function fetchMetric(metric) {
+  const today = getTodayStr();
+  const sources = USE_DATE_API ? [
+    { url: `/api/${metric}-date?date=${today}`, mode: 'date', label: 'daily file' },
+    { url: `/api/${metric}-hourly`, mode: 'hourly', label: 'hourly history' },
+    { url: `/api/${metric}`, mode: 'live', label: 'live buffer' }
+  ] : [
+    { url: `/api/${metric}`, mode: 'live', label: 'live buffer' },
+    { url: `/api/${metric}-hourly`, mode: 'hourly', label: 'hourly history' }
+  ];
+
+  let firstError = '';
+
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    try {
+      const res = await fetch(src.url, { cache: 'no-store' });
+      const data = await res.json();
+      const normalized = normalizeMetricData(metric, src.mode, data);
+      if (normalized) {
+        const warning = (i > 0 || (data && data.ok === false)) ?
+          `Using ${src.label} because ${firstError || 'primary source was empty or unavailable'}.` : '';
+        return { ...normalized, warning };
+      }
+      if (!firstError) firstError = (data && (data.error || data.message)) || 'No data available';
+    } catch (e) {
+      if (!firstError) firstError = e && e.message ? e.message : 'Fetch error';
+    }
+  }
+
+  return { series: [], timestamps: null, interval_ms: null, timeMode: null, expectedDurationMs: TIMEFRAME * 1000, warning: firstError || 'No data available' };
+}
+
+function updateWarning(messages) {
+  if (messages.length) {
+    warningEl.textContent = messages.join(' ');
+    warningEl.style.display = 'block';
+  } else {
+    warningEl.textContent = '';
+    warningEl.style.display = 'none';
+  }
+}
+
 // Draw a graph and update stats
 function renderGraph(chart, series, opts, nowEl, minEl, maxEl, unit) {
   const stats = drawLineSeries(chart.ctx, chart.cv, series, opts);
@@ -201,96 +290,67 @@ function renderGraph(chart, series, opts, nowEl, minEl, maxEl, unit) {
 // Fetch and render all graphs
 async function tick() {
   try {
+    const warnings = [];
+
     // Temperature
-    const tempEndpoint = USE_DATE_API ? '/api/temp-date?date=' + getTodayStr() : '/api/temp';
-    const tempRes = await fetch(tempEndpoint, {cache:'no-store'});
-    const tempData = await tempRes.json();
-    if (tempData.ok) {
-      let series, timestamps;
-      if (tempData.data) {
-        // Date API returns [[ts, val], ...]
-        timestamps = tempData.data.map(d => d[0]);
-        series = tempData.data.map(d => d[1]);
-      } else {
-        series = sliceSeries(tempData.series || [], tempData.interval_ms);
-      }
-      renderGraph(charts.temp, series, {
+    const tempData = await fetchMetric('temp');
+    if (tempData.series.length) {
+      renderGraph(charts.temp, tempData.series, {
         padFraction: 0.12,
         minPad: 0.2,
         interval_ms: tempData.interval_ms,
-        timeMode: USE_DATE_API ? 'absolute' : null,
-        timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
+        timeMode: tempData.timeMode,
+        timestamps: tempData.timestamps,
+        expectedDurationMs: tempData.expectedDurationMs
       }, $('tempNow'), $('tempMin'), $('tempMax'), ' °C');
     }
+    if (tempData.warning) warnings.push(tempData.warning);
 
     // Humidity
-    const humEndpoint = USE_DATE_API ? '/api/humidity-date?date=' + getTodayStr() : '/api/humidity';
-    const humRes = await fetch(humEndpoint, {cache:'no-store'});
-    const humData = await humRes.json();
-    if (humData.ok) {
-      let series, timestamps;
-      if (humData.data) {
-        timestamps = humData.data.map(d => d[0]);
-        series = humData.data.map(d => d[1]);
-      } else {
-        series = sliceSeries(humData.series || [], humData.interval_ms);
-      }
-      renderGraph(charts.hum, series, {
+    const humData = await fetchMetric('humidity');
+    if (humData.series.length) {
+      renderGraph(charts.hum, humData.series, {
         fixedMin: 0,
         fixedMax: 100,
         padFraction: 0,
         minPad: 0,
         interval_ms: humData.interval_ms,
-        timeMode: USE_DATE_API ? 'absolute' : null,
-        timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
+        timeMode: humData.timeMode,
+        timestamps: humData.timestamps,
+        expectedDurationMs: humData.expectedDurationMs
       }, $('humNow'), $('humMin'), $('humMax'), ' %');
     }
+    if (humData.warning) warnings.push(humData.warning);
 
     // Pressure
-    const pressEndpoint = USE_DATE_API ? '/api/pressure-date?date=' + getTodayStr() : '/api/pressure';
-    const pressRes = await fetch(pressEndpoint, {cache:'no-store'});
-    const pressData = await pressRes.json();
-    if (pressData.ok) {
-      let series, timestamps;
-      if (pressData.data) {
-        timestamps = pressData.data.map(d => d[0]);
-        series = pressData.data.map(d => d[1]);
-      } else {
-        series = sliceSeries(pressData.station_series || [], pressData.interval_ms);
-      }
-      renderGraph(charts.press, series, {
+    const pressData = await fetchMetric('pressure');
+    if (pressData.series.length) {
+      renderGraph(charts.press, pressData.series, {
         padFraction: 0.15,
         minPad: 0.2,
         interval_ms: pressData.interval_ms,
-        timeMode: USE_DATE_API ? 'absolute' : null,
-        timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
+        timeMode: pressData.timeMode,
+        timestamps: pressData.timestamps,
+        expectedDurationMs: pressData.expectedDurationMs
       }, $('pressNow'), $('pressMin'), $('pressMax'), ' hPa');
     }
+    if (pressData.warning) warnings.push(pressData.warning);
 
     // Gas
-    const gasEndpoint = USE_DATE_API ? '/api/gas-date?date=' + getTodayStr() : '/api/gas';
-    const gasRes = await fetch(gasEndpoint, {cache:'no-store'});
-    const gasData = await gasRes.json();
-    if (gasData.ok) {
-      let series, timestamps;
-      if (gasData.data) {
-        timestamps = gasData.data.map(d => d[0]);
-        series = gasData.data.map(d => d[1]);
-      } else {
-        series = sliceSeries(gasData.series || [], gasData.interval_ms);
-      }
-      renderGraph(charts.gas, series, {
+    const gasData = await fetchMetric('gas');
+    if (gasData.series.length) {
+      renderGraph(charts.gas, gasData.series, {
         padFraction: 0.15,
         minPad: 0.2,
         interval_ms: gasData.interval_ms,
-        timeMode: USE_DATE_API ? 'absolute' : null,
-        timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
+        timeMode: gasData.timeMode,
+        timestamps: gasData.timestamps,
+        expectedDurationMs: gasData.expectedDurationMs
       }, $('gasNow'), $('gasMin'), $('gasMax'), ' kΩ');
     }
+    if (gasData.warning) warnings.push(gasData.warning);
+
+    updateWarning(warnings);
   } catch(e) {
     console.error('Fetch error:', e);
   }
