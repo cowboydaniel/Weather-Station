@@ -59,9 +59,11 @@ function drawLineSeries(ctx, cv, series, opts={}){
   // Draw X-axis ticks and labels based on interval
   drawXAxisTicks(ctx, w, h, series.length, opts.interval_ms, opts.timeMode, opts.timestamps, opts.expectedDurationMs);
 
-  // Calculate x-positions based on timestamps and expected duration for absolute time mode
+  // Calculate x-positions based on timestamps and expected duration
   let getX;
-  if (opts.timeMode === 'absolute' && Array.isArray(opts.timestamps) && opts.timestamps.length === series.length && opts.expectedDurationMs) {
+  const hasExpectedDuration = !!opts.expectedDurationMs;
+  const hasInterval = typeof opts.interval_ms === 'number' && isFinite(opts.interval_ms);
+  if (opts.timeMode === 'absolute' && Array.isArray(opts.timestamps) && opts.timestamps.length === series.length && hasExpectedDuration) {
     // For 24-hour view with timestamps: position data relative to start of day
     const firstTimestamp = opts.timestamps[0];
     const dayStart = new Date(firstTimestamp);
@@ -73,6 +75,13 @@ function drawLineSeries(ctx, cv, series, opts={}){
       const timestamp = opts.timestamps[i];
       const elapsed = timestamp - dayStartMs;
       return (elapsed / expectedDurationMs) * w;
+    };
+  } else if (hasExpectedDuration && hasInterval) {
+    // Relative time with expected duration: newest point at right edge, older points offset by elapsed time
+    getX = (i) => {
+      const elapsedFromNewest = (series.length - 1 - i) * opts.interval_ms;
+      const x = w - (elapsedFromNewest / opts.expectedDurationMs) * w;
+      return Math.max(0, Math.min(w, x));
     };
   } else {
     // Original behavior: spread points evenly across canvas
@@ -228,37 +237,22 @@ function startSimpleSeriesPage(cfg){
     const dpr = window.devicePixelRatio || 1;
     const relXScaled = relX * dpr;
 
-    let clampedIdx;
-    if (lastTimeMode === 'absolute' && lastExpectedDurationMs && Array.isArray(lastTimestamps) && lastTimestamps.length > 0) {
-      // For absolute time mode, find the closest data point to the mouse position
-      // Convert mouse x position to time offset within the day
-      const firstTimestamp = lastTimestamps[0];
-      const dayStart = new Date(firstTimestamp);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayStartMs = dayStart.getTime();
-      const mouseTimeOffset = (relXScaled / w) * lastExpectedDurationMs;
-      const mouseTimestamp = dayStartMs + mouseTimeOffset;
-
-      // Find closest data point
-      let minDist = Infinity;
-      clampedIdx = 0;
-      for (let i = 0; i < lastTimestamps.length; i++) {
-        const dist = Math.abs(lastTimestamps[i] - mouseTimestamp);
-        if (dist < minDist) {
-          minDist = dist;
-          clampedIdx = i;
-        }
+    let clampedIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < lastSeries.length; i++) {
+      const dataPointX = lastStats.getX ? lastStats.getX(i) : (i / (lastSeries.length - 1)) * w;
+      const dist = Math.abs(relXScaled - dataPointX);
+      if (dist < minDist) {
+        minDist = dist;
+        clampedIdx = i;
       }
+    }
 
-      // Hide tooltip if mouse is too far from any data point (e.g., in blank area)
-      const dataPointX = lastStats.getX ? lastStats.getX(clampedIdx) : (clampedIdx / (lastSeries.length - 1)) * w;
-      if (Math.abs(relXScaled - dataPointX) > w * 0.02) { // Within 2% of canvas width
-        tooltip.classList.remove('visible');
-        return;
-      }
-    } else {
-      const idx = Math.round((relXScaled / w) * (lastSeries.length - 1));
-      clampedIdx = Math.max(0, Math.min(lastSeries.length - 1, idx));
+    // Hide tooltip if mouse is too far from any data point (e.g., in blank area)
+    const closestX = lastStats.getX ? lastStats.getX(clampedIdx) : (clampedIdx / (lastSeries.length - 1)) * w;
+    if (Math.abs(relXScaled - closestX) > w * 0.02) {
+      tooltip.classList.remove('visible');
+      return;
     }
 
     const value = lastSeries[clampedIdx];
