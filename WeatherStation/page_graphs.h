@@ -170,10 +170,21 @@ function getTodayStr() {
 
 // Slice series to timeframe for live data
 function sliceSeries(series, intervalMs) {
-  if (USE_DATE_API || !series || series.length === 0) return series;
-  const pointsPerSecond = 1000 / intervalMs;
-  const pointsNeeded = Math.ceil(TIMEFRAME * pointsPerSecond);
-  return series.slice(-pointsNeeded);
+  if (USE_DATE_API || !Array.isArray(series) || series.length === 0) return series;
+
+  const hasInterval = typeof intervalMs === 'number' && intervalMs > 0;
+  if (!hasInterval) return series;
+
+  const expectedCount = Math.max(1, Math.round((TIMEFRAME * 1000) / intervalMs));
+  const sliced = series.slice(-expectedCount);
+
+  if (sliced.length < expectedCount) {
+    const padLength = expectedCount - sliced.length;
+    const padding = new Array(padLength).fill(null);
+    return padding.concat(sliced);
+  }
+
+  return sliced;
 }
 
 // Draw a graph and update stats
