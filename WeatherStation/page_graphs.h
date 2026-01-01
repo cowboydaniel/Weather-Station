@@ -209,7 +209,7 @@ async function tick() {
         interval_ms: tempData.interval_ms,
         timeMode: USE_DATE_API ? 'absolute' : null,
         timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : null
+        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
       }, $('tempNow'), $('tempMin'), $('tempMax'), ' °C');
     }
 
@@ -233,7 +233,7 @@ async function tick() {
         interval_ms: humData.interval_ms,
         timeMode: USE_DATE_API ? 'absolute' : null,
         timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : null
+        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
       }, $('humNow'), $('humMin'), $('humMax'), ' %');
     }
 
@@ -255,7 +255,7 @@ async function tick() {
         interval_ms: pressData.interval_ms,
         timeMode: USE_DATE_API ? 'absolute' : null,
         timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : null
+        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
       }, $('pressNow'), $('pressMin'), $('pressMax'), ' hPa');
     }
 
@@ -277,7 +277,7 @@ async function tick() {
         interval_ms: gasData.interval_ms,
         timeMode: USE_DATE_API ? 'absolute' : null,
         timestamps: timestamps,
-        expectedDurationMs: USE_DATE_API ? 86400000 : null
+        expectedDurationMs: USE_DATE_API ? 86400000 : (TIMEFRAME * 1000)
       }, $('gasNow'), $('gasMin'), $('gasMax'), ' kΩ');
     }
   } catch(e) {
