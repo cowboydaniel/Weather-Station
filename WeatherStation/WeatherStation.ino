@@ -1262,6 +1262,39 @@ void setup() {
   // Prime
   updateSampling();
 
+  // Initialize SD card before starting server (needed for static asset files)
+  Serial.println("Initializing SD card...");
+  if (initSDCard()) {
+    // Load historical data from CSV into ring buffers
+    loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
+    sd_initialized = true;
+
+    // Check for required static asset files
+    bool has_css = SD.exists("app.css");
+    bool has_js = SD.exists("app.js");
+    bool has_favicon = SD.exists("favicon.svg");
+
+    if (!has_css || !has_js || !has_favicon) {
+      Serial.println("ERROR: Missing required static files on SD card!");
+      if (!has_css) Serial.println("  - app.css is missing");
+      if (!has_js) Serial.println("  - app.js is missing");
+      if (!has_favicon) Serial.println("  - favicon.svg is missing");
+      Serial.println("Please copy app.css, app.js, and favicon.svg to SD card root");
+      Serial.println("Web server will NOT start until files are present");
+      while (1) {
+        delay(1000);
+        Serial.println("Waiting for static files...");
+      }
+    }
+  } else {
+    Serial.println("ERROR: SD card initialization failed!");
+    Serial.println("Cannot start web server without SD card");
+    while (1) {
+      delay(1000);
+      Serial.println("Waiting for SD card...");
+    }
+  }
+
   server.begin();
   Serial.println("Web server started");
   Serial.print("Open browser to: http://");
@@ -1278,19 +1311,6 @@ void loop() {
   if (!ntp_sync_attempted && WiFi.status() == WL_CONNECTED) {
     ntp_sync_attempted = true;
     ntp_sync_successful = configureNTPTime();
-  }
-
-  // Initialize SD card after successful NTP sync (happens once)
-  // This ensures files are created with correct timestamps
-  if (ntp_sync_successful && !sd_initialized) {
-    sd_initialized = true;
-    Serial.println("Initializing SD card...");
-    if (initSDCard()) {
-      // Load historical data from CSV into ring buffers
-      loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
-    } else {
-      Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
-    }
   }
 
   // Calculate loop rate (update every second)
