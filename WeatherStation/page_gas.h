@@ -23,7 +23,7 @@ static void sendPageGas(WiFiClient &client) {
   <div class="top">
     <div>
       <h1>Gas Resistance</h1>
-      <div class="sub">10-minute history, sampled every 3 seconds</div>
+      <div class="sub">24-hour history (or less if device recently started), sampled every 3 seconds</div>
     </div>
     <a class="kpi" href="/">Back</a>
   </div>

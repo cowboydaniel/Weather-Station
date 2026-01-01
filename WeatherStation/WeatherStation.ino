@@ -48,8 +48,8 @@ const uint32_t ENV_INTERVAL_MS = 1000;  // temp/hum/pressure
 const uint32_t GAS_INTERVAL_MS = 3000;  // gas resistance
 
 // History sizes
-const int ENV_SERIES_POINTS = 600;  // 10 minutes @ 1 Hz
-const int GAS_SERIES_POINTS = 200;  // 10 minutes @ 3 s
+const int ENV_SERIES_POINTS = 86400; // 24 hours @ 1 Hz
+const int GAS_SERIES_POINTS = 28800; // 24 hours @ 3 s (one sample every 3 seconds)
 const uint32_t SLP_TREND_SAMPLE_MS = 60000; // 1-minute samples
 const int SLP_TREND_POINTS = 60;            // 60 minutes history
 const int SLP_TREND_WINDOW_MIN = 15;        // slope over 15 minutes

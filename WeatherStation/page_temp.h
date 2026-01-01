@@ -23,7 +23,7 @@ static void sendPageTemp(WiFiClient &client) {
   <div class="top">
     <div>
       <h1>Temperature</h1>
-      <div class="sub">10-minute history, 1 sample per second</div>
+      <div class="sub">24-hour history (or less if device recently started), 1 sample per second</div>
     </div>
     <a class="kpi" href="/">Back</a>
   </div>
