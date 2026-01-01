@@ -541,6 +541,14 @@ select option{ background:#1a1a1a; color:white; }
   grid-template-columns:repeat(7,1fr);
   gap:4px;
 }
+.calendar-weekday{
+  text-align:center;
+  font-size:11px;
+  font-weight:600;
+  color:rgba(255,255,255,0.5);
+  padding:4px 0;
+  text-transform:uppercase;
+}
 .calendar-date{
   padding:6px;
   text-align:center;
