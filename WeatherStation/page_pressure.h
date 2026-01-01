@@ -49,9 +49,27 @@ static void sendPagePressure(WiFiClient &client) {
 const station = setupCanvas('cv1', 260);
 const slpTrendChart = setupCanvas('cv2', 260);
 
+function getChartEndpoint(baseEndpoint) {
+  const saved = localStorage.getItem('weatherSettings');
+  let graphSpan = 600; // default
+  if (saved) {
+    try {
+      const settings = JSON.parse(saved);
+      graphSpan = settings.graphSpan || 600;
+    } catch (e) {}
+  }
+
+  // For longer periods (6hr+), use hourly data
+  if (graphSpan > 600) {
+    return baseEndpoint + '-hourly';
+  }
+  return baseEndpoint;
+}
+
 async function tick(){
   try{
-    const r = await fetch('/api/pressure', {cache:'no-store'});
+    const endpoint = getChartEndpoint('/api/pressure');
+    const r = await fetch(endpoint, {cache:'no-store'});
     const j = await r.json();
     if(!j.ok) return;
 

@@ -41,8 +41,25 @@ static void sendPageHumidity(WiFiClient &client) {
 </div>
 
 <script>
+function getChartEndpoint(baseEndpoint) {
+  const saved = localStorage.getItem('weatherSettings');
+  let graphSpan = 600; // default
+  if (saved) {
+    try {
+      const settings = JSON.parse(saved);
+      graphSpan = settings.graphSpan || 600;
+    } catch (e) {}
+  }
+
+  // For longer periods (6hr+), use hourly data
+  if (graphSpan > 600) {
+    return baseEndpoint + '-hourly';
+  }
+  return baseEndpoint;
+}
+
 startSimpleSeriesPage({
-  endpoint:'/api/humidity',
+  endpoint: getChartEndpoint('/api/humidity'),
   canvasId:'cv',
   unit:' %',
   decimals:1,

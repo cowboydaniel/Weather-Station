@@ -80,8 +80,18 @@ RingF humSeries(ENV_SERIES_POINTS);
 RingF pressSeries(ENV_SERIES_POINTS);     // station pressure hPa
 RingF gasSeries(GAS_SERIES_POINTS);       // gas kOhm
 
+// Hourly history for longer-term visualization (24 samples = 24 hours)
+RingF tempSeries_hourly(24);
+RingF humSeries_hourly(24);
+RingF pressSeries_hourly(24);              // station pressure hPa
+RingF gasSeries_hourly(24);                // gas kOhm
+
 RingF slpTrend(SLP_TREND_POINTS);         // sea-level pressure trend (1/min)
 uint32_t last_slp_trend_ms = 0;
+
+// Hourly sampling for long-term history
+const uint32_t HOURLY_SAMPLE_MS = 3600000;  // 1 hour in milliseconds
+uint32_t last_hourly_sample_ms = 0;
 
 // Request statistics
 volatile uint32_t req_total = 0;
@@ -312,6 +322,16 @@ static void updateSampling() {
     cached_tend = pressureTendency_hPaPerHour(cached_slp, SLP_TREND_WINDOW_MIN);
     cached_storm = stormScore(cached_slp, cached_tend, h_raw);
   }
+
+  // Hourly sampling for long-term history (24-hour window)
+  if (now - last_hourly_sample_ms >= HOURLY_SAMPLE_MS) {
+    last_hourly_sample_ms = now;
+    // Push latest readings to hourly buffers
+    tempSeries_hourly.push(t_raw);
+    humSeries_hourly.push(h_raw);
+    pressSeries_hourly.push(p_raw_hpa);
+    gasSeries_hourly.push(g_raw_kohm);
+  }
 }
 
 // API endpoints
@@ -365,6 +385,51 @@ static void sendJSONGas(WiFiClient &c) {
   c.println();
   c.print("{\"ok\":true,\"unit\":\"kOhm\",\"interval_ms\":"); c.print(GAS_INTERVAL_MS);
   c.print(",\"series\":"); jsonWriteSeries(c, gasSeries, 2);
+  c.println("}");
+}
+
+// Hourly API endpoints (24-hour history)
+static void sendJSONTempHourly(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+  c.print("{\"ok\":true,\"unit\":\"C\",\"interval_ms\":"); c.print(HOURLY_SAMPLE_MS);
+  c.print(",\"series\":"); jsonWriteSeries(c, tempSeries_hourly, 2);
+  c.println("}");
+}
+
+static void sendJSONHumidityHourly(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+  c.print("{\"ok\":true,\"unit\":\"%\",\"interval_ms\":"); c.print(HOURLY_SAMPLE_MS);
+  c.print(",\"series\":"); jsonWriteSeries(c, humSeries_hourly, 2);
+  c.println("}");
+}
+
+static void sendJSONPressureHourly(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+  c.print("{\"ok\":true,\"unit\":\"hPa\",\"interval_ms\":"); c.print(HOURLY_SAMPLE_MS);
+  c.print(",\"series\":"); jsonWriteSeries(c, pressSeries_hourly, 2);
+  c.println("}");
+}
+
+static void sendJSONGasHourly(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+  c.print("{\"ok\":true,\"unit\":\"kOhm\",\"interval_ms\":"); c.print(HOURLY_SAMPLE_MS);
+  c.print(",\"series\":"); jsonWriteSeries(c, gasSeries_hourly, 2);
   c.println("}");
 }
 
@@ -787,6 +852,12 @@ void setup() {
 
   // Initialize WiFi manager for non-blocking connection with exponential backoff
   initWiFiManager();
+
+  // Set hostname BEFORE attempting WiFi connection
+  WiFi.setHostname(device_name);
+  Serial.print("[Setup] WiFi hostname set to: ");
+  Serial.println(device_name);
+
   Serial.println("Connecting to WiFi (non-blocking)...");
   WiFi.begin(ssid, pass);  // Initiate connection attempt
   // Connection happens in background; status checked periodically in loop()
@@ -816,6 +887,7 @@ void setup() {
   last_env_ms = millis() - ENV_INTERVAL_MS;
   last_gas_ms = millis() - GAS_INTERVAL_MS;
   last_slp_trend_ms = millis() - SLP_TREND_SAMPLE_MS;
+  last_hourly_sample_ms = millis() - HOURLY_SAMPLE_MS;
 
   // Prime
   updateSampling();
@@ -830,7 +902,7 @@ void loop() {
   updateSampling();
 
   // Check WiFi status and attempt reconnection if needed
-  updateWiFiStatus(ssid, pass, device_name);
+  updateWiFiStatus(ssid, pass);
 
   // Calculate loop rate (update every second)
   loop_count++;
@@ -931,14 +1003,26 @@ void loop() {
   } else if (reqLine.startsWith("GET /api/stats")) {
     sendJSONStats(client);
     isApi = true;
+  } else if (reqLine.startsWith("GET /api/temp-hourly")) {
+    sendJSONTempHourly(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/temp")) {
     sendJSONTemp(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/humidity-hourly")) {
+    sendJSONHumidityHourly(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/humidity")) {
     sendJSONHumidity(client);
     isApi = true;
+  } else if (reqLine.startsWith("GET /api/pressure-hourly")) {
+    sendJSONPressureHourly(client);
+    isApi = true;
   } else if (reqLine.startsWith("GET /api/pressure")) {
     sendJSONPressure(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/gas-hourly")) {
+    sendJSONGasHourly(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/gas")) {
     sendJSONGas(client);

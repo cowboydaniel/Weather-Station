@@ -117,13 +117,16 @@ static void sendPageSettings(WiFiClient &client) {
     <div class="field">
       <div>
         <div class="field-label">Graph time span</div>
-        <div class="field-desc">Visible history window (limited by buffer)</div>
+        <div class="field-desc">Visible history window</div>
       </div>
       <div class="field-control">
         <select id="graph-span">
           <option value="60">1 minute</option>
           <option value="300">5 minutes</option>
-          <option value="600" selected>10 minutes (full)</option>
+          <option value="600" selected>10 minutes (full detail)</option>
+          <option value="21600">6 hours</option>
+          <option value="43200">12 hours</option>
+          <option value="86400">24 hours</option>
         </select>
       </div>
     </div>
