@@ -168,6 +168,8 @@ function recreatePage() {
   if (pageState.page && pageState.page.intervalId) {
     clearInterval(pageState.page.intervalId);
   }
+  // For 24hr timeframe, pass expectedDurationMs so the graph shows full day axis
+  const expectedDurationMs = pageState.selectedTimeframe >= 86400 ? 86400000 : null;
   const page = startSimpleSeriesPage({
     endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate, pageState.selectedTimeframe),
     canvasId:'cv',
@@ -179,12 +181,13 @@ function recreatePage() {
     minPad:0.2,
     nowId:'now',
     minId:'minv',
-    maxId:'maxv'
+    maxId:'maxv',
+    expectedDurationMs: expectedDurationMs
   });
 
   // Wrap render to slice data for timeframes < 10 minutes
   const originalRender = page.render;
-  page.render = function(series, interval_ms, timeMode, timestamps) {
+  page.render = function(series, interval_ms, timeMode, timestamps, expectedDurationMs) {
     if (pageState.selectedTimeframe < 600 && !pageState.selectedDate) {
       // Slice to the requested timeframe
       const pointsToShow = Math.ceil(pageState.selectedTimeframe);
@@ -193,7 +196,7 @@ function recreatePage() {
         timestamps = timestamps.slice(-pointsToShow);
       }
     }
-    return originalRender.call(this, series, interval_ms, timeMode, timestamps);
+    return originalRender.call(this, series, interval_ms, timeMode, timestamps, expectedDurationMs);
   };
 
   pageState.page = page;
@@ -285,19 +288,8 @@ if (datePickerBtn) {
   datePickerBtn.addEventListener('click', openCalendarModal);
 }
 
-pageState.page = startSimpleSeriesPage({
-  endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate, pageState.selectedTimeframe),
-  canvasId:'cv',
-  unit:' kΩ',
-  decimals:1,
-  pollMs:3000,
-  height:360,
-  padFraction:0.15,
-  minPad:0.2,
-  nowId:'now',
-  minId:'minv',
-  maxId:'maxv'
-});
+// Initialize page using recreatePage to ensure consistent config
+recreatePage();
 
 loadAvailableDates();
 </script>
