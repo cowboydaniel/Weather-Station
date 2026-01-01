@@ -23,7 +23,7 @@ static void sendPagePressure(WiFiClient &client) {
   <div class="top">
     <div>
       <h1>Pressure</h1>
-      <div class="sub">Station pressure (24hr or less, 1 Hz) and sea-level pressure trend (60 min, 1/min)</div>
+      <div class="sub">Station pressure (10-min live or 24hr from SD card) and trend (60-min live)</div>
     </div>
     <a class="kpi" href="/">Back</a>
   </div>
@@ -224,12 +224,23 @@ if (timeframeSelect) {
     localStorage.setItem('pressureGraphSpan', pageState.selectedTimeframe);
 
     const datePickerBtn = $('datePickerBtn');
-    if (pageState.selectedTimeframe === 86400) {
+    const today = new Date();
+    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+    if (pageState.selectedTimeframe >= 21600) {  // 6hr or longer: 6hr=21600, 12hr=43200, 24hr=86400
+      // Auto-load today's data from SD card
+      pageState.selectedDate = todayStr;
       datePickerBtn.style.display = 'inline-block';
-      openCalendarModal();
+      datePickerBtn.textContent = todayStr;
+      if (pageState.selectedTimeframe === 86400) {
+        // Only show calendar for 24hr mode
+        // Don't auto-open, but allow manual date picking
+      }
+      closeCalendarModal();
     } else {
-      datePickerBtn.style.display = 'none';
+      // Live data from RAM buffer (1m, 5m, 10m)
       pageState.selectedDate = '';
+      datePickerBtn.style.display = 'none';
       closeCalendarModal();
     }
     tick();
