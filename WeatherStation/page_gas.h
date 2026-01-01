@@ -31,13 +31,20 @@ static void sendPageGas(WiFiClient &client) {
   <div class="card">
     <div class="kpis">
       <div class="kpi">Now: <b id="now">--</b></div>
-      <div style="flex: 1;"></div>
-      <div class="kpi">
-        Date:
-        <select id="dateSelect" style="padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; font-size: 14px;">
-          <option value="">Today (Live)</option>
-        </select>
-      </div>
+    </div>
+    <div class="timeframe-selector">
+      <span class="timeframe-label">Time span:</span>
+      <select id="timeframeSelect">
+        <option value="60">1 minute</option>
+        <option value="300">5 minutes</option>
+        <option value="600" selected>10 minutes</option>
+        <option value="21600">6 hours</option>
+        <option value="43200">12 hours</option>
+        <option value="86400">24 hours</option>
+      </select>
+      <span class="timeframe-label" style="margin-left: 16px;">Date:</span>
+      <button id="datePickerBtn" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">Today (Live)</button>
+      <div id="calendarContainer" class="calendar-container"></div>
     </div>
     <div style="margin-top:12px">
       <canvas id="cv" class="chart chart-lg" width="1000" height="360"></canvas>
@@ -51,67 +58,125 @@ static void sendPageGas(WiFiClient &client) {
 </div>
 
 <script>
+const METRIC = 'gas';
+const METRIC_KEY = 'gas';
 let pageState = {
   baseEndpoint: '/api/gas',
   selectedDate: '',
+  selectedTimeframe: 600,
+  availableDates: [],
   page: null
 };
 
-function getChartEndpoint(baseEndpoint, selectedDate) {
+function getChartEndpoint(baseEndpoint, selectedDate, timeframe) {
   if (selectedDate) {
-    // Use per-day endpoint with the new date-specific API
-    // e.g., /api/gas-date?date=2024-01-15
     return baseEndpoint + '-date?date=' + encodeURIComponent(selectedDate);
   }
-
-  const saved = localStorage.getItem('weatherSettings');
-  let graphSpan = 600; // default
-  if (saved) {
-    try {
-      const settings = JSON.parse(saved);
-      graphSpan = settings.graphSpan || 600;
-    } catch (e) {}
-  }
-
-  // For longer periods (6hr+), use hourly data
-  if (graphSpan > 600) {
+  if (timeframe > 600) {
     return baseEndpoint + '-hourly';
   }
   return baseEndpoint;
 }
 
+function renderCalendar() {
+  const container = $('calendarContainer');
+  if (!container) return;
+
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startingDayOfWeek = firstDay.getDay();
+
+  let html = '<div class="calendar-header">';
+  html += '<div>' + firstDay.toLocaleDateString('en-US', {month: 'short', year: 'numeric'}) + '</div>';
+  html += '</div>';
+  html += '<div class="calendar-dates">';
+
+  for (let i = 0; i < startingDayOfWeek; i++) {
+    html += '<div class="calendar-date disabled"></div>';
+  }
+
+  const today_str = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+    const hasData = pageState.availableDates.includes(dateStr) || dateStr === today_str;
+    const isActive = dateStr === pageState.selectedDate || (pageState.selectedDate === '' && dateStr === today_str);
+
+    html += '<div class="calendar-date' + (hasData ? ' has-data' : '') + (isActive ? ' active' : '') + '" data-date="' + dateStr + '">' + day + '</div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+
+  container.querySelectorAll('[data-date]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      pageState.selectedDate = e.target.dataset.date;
+      renderCalendar();
+      $('datePickerBtn').textContent = pageState.selectedDate;
+      if (pageState.page && pageState.page.tick) {
+        pageState.page.tick();
+      }
+    });
+  });
+}
+
+function toggleCalendar() {
+  const container = $('calendarContainer');
+  if (container) {
+    if (pageState.selectedTimeframe === 86400) {
+      container.classList.toggle('visible');
+    } else {
+      container.classList.remove('visible');
+    }
+  }
+}
+
 function loadAvailableDates() {
-  fetch('/api/available-dates?metric=gas', {cache:'no-store'})
+  fetch('/api/available-dates?metric=' + METRIC, {cache:'no-store'})
     .then(r => r.json())
     .then(data => {
       if (data.ok && Array.isArray(data.dates)) {
-        const select = $('dateSelect');
-        if (!select) return;
-
-        data.dates.forEach(date => {
-          const option = document.createElement('option');
-          option.value = date;
-          option.textContent = date;
-          select.appendChild(option);
-        });
+        pageState.availableDates = data.dates;
+        if (pageState.selectedTimeframe === 86400) {
+          renderCalendar();
+        }
       }
     })
     .catch(e => console.log('Could not load dates:', e));
 }
 
-const dateSelect = $('dateSelect');
-if (dateSelect) {
-  dateSelect.addEventListener('change', (e) => {
-    pageState.selectedDate = e.target.value;
-    const newEndpoint = getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate);
+const timeframeSelect = $('timeframeSelect');
+if (timeframeSelect) {
+  const saved = localStorage.getItem('gasGraphSpan');
+  if (saved) {
+    timeframeSelect.value = saved;
+    pageState.selectedTimeframe = parseInt(saved, 10);
+  }
+
+  timeframeSelect.addEventListener('change', (e) => {
+    pageState.selectedTimeframe = parseInt(e.target.value, 10);
+    localStorage.setItem('gasGraphSpan', pageState.selectedTimeframe);
+    pageState.selectedDate = '';
+    $('datePickerBtn').textContent = 'Today (Live)';
+    toggleCalendar();
     if (pageState.page && pageState.page.tick) {
       pageState.page.tick();
     }
   });
 }
 
+const datePickerBtn = $('datePickerBtn');
+if (datePickerBtn) {
+  datePickerBtn.addEventListener('click', toggleCalendar);
+}
+
 pageState.page = startSimpleSeriesPage({
-  endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate),
+  endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate, pageState.selectedTimeframe),
   canvasId:'cv',
   unit:' kΩ',
   decimals:1,
@@ -124,6 +189,7 @@ pageState.page = startSimpleSeriesPage({
   maxId:'maxv'
 });
 
+toggleCalendar();
 loadAvailableDates();
 </script>
 </body></html>

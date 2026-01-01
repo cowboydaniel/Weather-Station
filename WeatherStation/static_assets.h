@@ -463,6 +463,136 @@ select:focus{ outline:none; border-color:var(--accent); }
 .refresh-btn.loading svg{ animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
+select, input[type="text"], input[type="number"]{
+  padding:8px 12px;
+  border-radius:6px;
+  border:1px solid rgba(255,255,255,0.15);
+  background:rgba(255,255,255,0.05);
+  color:white;
+  font-size:14px;
+  font-family:inherit;
+}
+select:focus, input:focus{
+  outline:none;
+  border-color:rgba(255,255,255,0.3);
+  background:rgba(255,255,255,0.08);
+}
+select option{ background:#1a1a1a; color:white; }
+
+.timeframe-selector{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  padding:12px;
+  background:rgba(255,255,255,0.03);
+  border-radius:10px;
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+.timeframe-label{
+  font-size:12px;
+  color:rgba(255,255,255,0.6);
+  text-transform:uppercase;
+  letter-spacing:0.3px;
+  font-weight:600;
+}
+.timeframe-selector select{
+  flex:0 0 auto;
+  padding:6px 10px;
+  font-size:13px;
+  min-width:140px;
+}
+
+.calendar-container{
+  display:none;
+  position:absolute;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+  z-index:1000;
+  box-shadow:var(--shadow);
+  margin-top:8px;
+  max-width:280px;
+}
+.calendar-container.visible{
+  display:block;
+}
+.calendar-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:12px;
+  font-weight:600;
+  font-size:14px;
+}
+.calendar-nav{
+  display:flex;
+  gap:4px;
+}
+.calendar-nav button{
+  padding:4px 8px;
+  background:rgba(255,255,255,0.1);
+  border:none;
+  border-radius:4px;
+  color:white;
+  cursor:pointer;
+  font-size:12px;
+}
+.calendar-nav button:hover{
+  background:rgba(255,255,255,0.15);
+}
+.calendar-dates{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:4px;
+}
+.calendar-date{
+  padding:6px;
+  text-align:center;
+  border-radius:4px;
+  font-size:12px;
+  cursor:pointer;
+  border:1px solid transparent;
+  background:rgba(255,255,255,0.04);
+  color:rgba(255,255,255,0.7);
+}
+.calendar-date:hover{
+  background:rgba(255,255,255,0.1);
+  border-color:rgba(255,255,255,0.2);
+}
+.calendar-date.has-data{
+  color:rgba(120,200,255,0.9);
+  font-weight:600;
+}
+.calendar-date.active{
+  background:rgba(120,200,255,0.3);
+  border-color:rgba(120,200,255,0.5);
+  color:white;
+}
+.calendar-date.disabled{
+  opacity:0.3;
+  cursor:not-allowed;
+}
+
+.hover-tooltip{
+  display:none;
+  position:absolute;
+  background:rgba(0,0,0,0.9);
+  border:1px solid rgba(255,255,255,0.2);
+  border-radius:8px;
+  padding:8px 12px;
+  font-size:13px;
+  color:white;
+  pointer-events:none;
+  z-index:999;
+  white-space:nowrap;
+  box-shadow:0 4px 12px rgba(0,0,0,0.6);
+}
+.hover-tooltip.visible{
+  display:block;
+}
+
 @media (max-width:860px){
   .kpi-grid{ grid-template-columns:repeat(2,1fr); }
   .kpi{ grid-template-columns:repeat(2,1fr); }
@@ -471,6 +601,7 @@ select:focus{ outline:none; border-color:var(--accent); }
   .card{ grid-column:span 12; }
   .top, header{ flex-direction:column; align-items:flex-start; }
   .page-index .card{ grid-column:span 12; }
+  .timeframe-selector{ flex-direction:column; }
 }
 )CSS";
 
@@ -522,7 +653,7 @@ function drawLineSeries(ctx, cv, series, opts={}){
   }
 
   // Draw X-axis ticks and labels based on interval
-  drawXAxisTicks(ctx, w, h, series.length, opts.interval_ms);
+  drawXAxisTicks(ctx, w, h, series.length, opts.interval_ms, opts.timeMode, opts.timestamps);
 
   ctx.lineWidth = 3;
   ctx.strokeStyle = 'rgba(255,255,255,0.88)';
@@ -541,36 +672,50 @@ function drawLineSeries(ctx, cv, series, opts={}){
   ctx.fill();
   ctx.globalAlpha = 1;
 
-  return {min: dataMin, max: dataMax, last: data[data.length-1]};
+  return {min: dataMin, max: dataMax, last: data[data.length-1], data: series, min: min, max: max, range: rng};
 }
 
-function drawXAxisTicks(ctx, w, h, numPoints, interval_ms){
+function drawXAxisTicks(ctx, w, h, numPoints, interval_ms, timeMode, timestamps){
   if (!interval_ms || numPoints < 2) return;
 
   const HOURLY_MS = 3600000;
   let tickCount, tickLabel;
 
-  if (interval_ms >= HOURLY_MS) {
-    // Hourly data: show hour ticks
+  if (timeMode === 'absolute' && Array.isArray(timestamps) && timestamps.length === numPoints) {
+    // Absolute time mode for 24-hour data with real timestamps
+    tickCount = Math.min(5, numPoints - 1);
+    const firstTime = timestamps[0];
+    const lastTime = timestamps[numPoints - 1];
+
+    tickLabel = (idx) => {
+      const timeIdx = Math.round((idx / tickCount) * (numPoints - 1));
+      const timestamp = timestamps[timeIdx];
+      if (!timestamp) return '';
+      const date = new Date(timestamp);
+      return date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0');
+    };
+  } else if (interval_ms >= HOURLY_MS) {
+    // Relative time for hourly data
     tickCount = Math.min(numPoints - 1, 6);
-    tickLabel = (idx) => idx + 'h';
+    tickLabel = (idx) => '-' + (tickCount - idx) + 'h';
   } else if (interval_ms >= 60000) {
-    // Minute-scale data: show minute ticks
+    // Relative time for minute-scale data
     const minutes = Math.round(numPoints * interval_ms / 60000);
     tickCount = Math.min(Math.ceil(minutes / 5), 6);
     tickLabel = (idx) => {
       const totalMinutes = Math.round(numPoints * interval_ms / 60000);
       const minPerTick = Math.max(1, Math.round(totalMinutes / tickCount));
-      return (idx * minPerTick) + 'm';
+      return '-' + (tickCount - idx) * minPerTick + 'm';
     };
   } else {
-    // Second-scale data: show second ticks
+    // Relative time for second-scale data
     const seconds = Math.round(numPoints * interval_ms / 1000);
     tickCount = Math.min(Math.ceil(seconds / 30), 6);
     tickLabel = (idx) => {
       const totalSeconds = Math.round(numPoints * interval_ms / 1000);
       const secPerTick = Math.max(1, Math.round(totalSeconds / tickCount));
-      return (idx * secPerTick) + 's';
+      const secVal = (tickCount - idx) * secPerTick;
+      return '-' + secVal + 's';
     };
   }
 
@@ -604,28 +749,82 @@ function startSimpleSeriesPage(cfg){
   const unit = cfg.unit || '';
   const chart = setupCanvas(cfg.canvasId, cfg.height || 360);
   let lastInterval = null;
+  let lastSeries = null;
+  let lastStats = null;
+  let lastTimeMode = null;
+  let lastTimestamps = null;
 
-  const render = (series, interval_ms) => {
+  // Create tooltip element
+  const tooltip = document.createElement('div');
+  tooltip.className = 'hover-tooltip';
+  document.body.appendChild(tooltip);
+
+  const render = (series, interval_ms, timeMode, timestamps) => {
     lastInterval = interval_ms;
+    lastSeries = series;
+    lastTimeMode = timeMode;
+    lastTimestamps = timestamps;
     const stats = drawLineSeries(chart.ctx, chart.cv, series, {
       fixedMin: cfg.fixedMin,
       fixedMax: cfg.fixedMax,
       padFraction: cfg.padFraction,
       minPad: cfg.minPad,
-      interval_ms: interval_ms
+      interval_ms: interval_ms,
+      timeMode: timeMode,
+      timestamps: timestamps
     });
+    lastStats = stats;
     if (!stats) return;
     if (nowEl) nowEl.textContent = stats.last.toFixed(decimals) + unit;
     if (minEl) minEl.textContent = stats.min.toFixed(decimals) + unit;
     if (maxEl) maxEl.textContent = stats.max.toFixed(decimals) + unit;
   };
 
+  // Mouse hover handler
+  chart.cv.addEventListener('mousemove', (e) => {
+    if (!lastStats || !lastSeries || !lastStats.data) {
+      tooltip.classList.remove('visible');
+      return;
+    }
+
+    const rect = chart.cv.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    const w = chart.cv.width;
+    const dpr = window.devicePixelRatio || 1;
+    const relXScaled = relX * dpr;
+
+    const idx = Math.round((relXScaled / w) * (lastSeries.length - 1));
+    const clampedIdx = Math.max(0, Math.min(lastSeries.length - 1, idx));
+    const value = lastSeries[clampedIdx];
+
+    if (typeof value !== 'number' || !isFinite(value)) {
+      tooltip.classList.remove('visible');
+      return;
+    }
+
+    // Build tooltip text
+    let tooltipText = value.toFixed(decimals) + unit;
+    if (lastTimeMode === 'absolute' && Array.isArray(lastTimestamps) && lastTimestamps[clampedIdx]) {
+      const date = new Date(lastTimestamps[clampedIdx]);
+      tooltipText += ' at ' + date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0');
+    }
+
+    tooltip.textContent = tooltipText;
+    tooltip.classList.add('visible');
+    tooltip.style.left = e.clientX + 'px';
+    tooltip.style.top = (e.clientY - 30) + 'px';
+  });
+
+  chart.cv.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+  });
+
   const tick = async () => {
     try{
       const r = await fetch(cfg.endpoint, {cache:'no-store'});
       const j = await r.json();
       if(!j.ok) return;
-      render(j.series || [], j.interval_ms);
+      render(j.series || [], j.interval_ms, j.timeMode, j.timestamps);
     }catch(e){}
   };
   tick();
