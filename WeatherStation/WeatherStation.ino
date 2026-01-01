@@ -933,7 +933,7 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
           if (!first_data) c.print(",");
           c.print("[");
           char ts_buf[32];
-          snprintf(ts_buf, sizeof(ts_buf), "%llu", (unsigned long long)ts);
+          u64ToStr(ts, ts_buf, sizeof(ts_buf));
           c.print(ts_buf);
           c.print(",");
           c.print(value, 2);
