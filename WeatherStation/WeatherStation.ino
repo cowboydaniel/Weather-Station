@@ -1046,21 +1046,22 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
 
 // ============ NTP TIME CONFIGURATION ============
 // Configure time via NTP (requires WiFi connection)
+// Note: Arduino WiFiS3 uses WiFi module's internal time, no configTime() needed
 static bool configureNTPTime() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[Time] WiFi not connected, cannot sync time");
     return false;
   }
 
-  Serial.println("[Time] Syncing time via NTP...");
-  // Set timezone
+  Serial.println("[Time] Syncing time via NTP (WiFi module internal)...");
+
+  // Set timezone for correct local time
   setenv("TZ", timezone_str, 1);
   tzset();
 
-  // Configure time with NTP
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-
-  // Wait up to 10 seconds for time to sync
+  // Wait for WiFi module to sync time (happens automatically)
+  // Arduino WiFiS3 board syncs time internally via WiFi module
+  // Just wait a bit and verify time is valid
   time_t now = time(nullptr);
   int attempts = 0;
   while (now < 24 * 3600 && attempts < 100) {  // Time should be after Jan 1, 1970 00:00:24
@@ -1070,17 +1071,17 @@ static bool configureNTPTime() {
   }
 
   if (now > 24 * 3600) {
-    Serial.print("[Time] NTP sync successful. Current time: ");
+    Serial.print("[Time] Time is valid. Current time: ");
     Serial.println(ctime(&now));
     return true;
   } else {
-    Serial.println("[Time] NTP sync timeout");
+    Serial.println("[Time] Time sync not yet available");
     return false;
   }
 }
 
 // Get current date as YYYY-MM-DD string
-static void getCurrentDateString(char* dateStr, int maxLen) {
+void getCurrentDateString(char* dateStr, int maxLen) {
   time_t now = time(nullptr);
   struct tm* timeinfo = localtime(&now);
   strftime(dateStr, maxLen, "%Y-%m-%d", timeinfo);

@@ -64,7 +64,8 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
 
 // ============ LOG READING TO CSV ============
 // Forward declaration for helper function (will be defined in main sketch)
-extern void getCurrentDateString(char* dateStr, int maxLen);
+// Note: Implementation must be non-static so this forward declaration works
+void getCurrentDateString(char* dateStr, int maxLen);
 
 // All possible sensor data for complete historical logging
 // Logs to per-day files: YYYY-MM-DD.csv
