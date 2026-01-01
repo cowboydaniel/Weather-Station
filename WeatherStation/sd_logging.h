@@ -87,10 +87,19 @@ bool logSensorReading(unsigned long timestamp_ms,
   char filename[32];
   snprintf(filename, sizeof(filename), "%s.csv", date_str);
 
+  // Check if this is a new file (doesn't exist yet)
+  bool is_new_file = !sd.exists(filename);
+
   // Open file in append mode
   if (!logFile.open(filename, O_WRONLY | O_CREAT | O_APPEND)) {
     strcpy(sd_info.error_msg, "Cannot open daily CSV");
     return false;
+  }
+
+  // Log file creation
+  if (is_new_file) {
+    Serial.print("[SD] Created new daily log: ");
+    Serial.println(filename);
   }
 
   // Format: timestamp_ms,temp_c,humidity_pct,pressure_station_hpa,pressure_sealevel_hpa,

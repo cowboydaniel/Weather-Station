@@ -106,6 +106,9 @@ volatile uint32_t loop_count = 0;
 volatile uint32_t last_loop_rate_ms = 0;
 volatile float loop_rate_hz = 0;
 
+// NTP time sync tracking
+static bool ntp_sync_attempted = false;
+
 static void configureBME() {
   bme.setTemperatureOversampling(BME680_OS_4X);
   bme.setHumidityOversampling(BME680_OS_2X);
@@ -816,6 +819,12 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
     return;
   }
 
+  // Log file access
+  Serial.print("[API] Loading ");
+  Serial.print(filename);
+  Serial.print(" for ");
+  Serial.println(metric);
+
   // Determine which field to extract based on metric
   int metric_field = -1;
   if (strcmp(metric, "temp") == 0) metric_field = 1;
@@ -1012,6 +1021,68 @@ static uint32_t loadCSVFile(const char* filename,
   return sample_count;
 }
 
+// ============ LIST CSV FILES ============
+// List all YYYY-MM-DD.csv files on SD card in alphabetical order
+void listCSVFiles() {
+  if (!sd_info.initialized) {
+    return;
+  }
+
+  Serial.println("\n=== Available CSV Data Files ===");
+
+  // Open root directory
+  SdFile root;
+  if (!root.open("/")) {
+    Serial.println("Failed to open root directory");
+    return;
+  }
+
+  // Collect all CSV filenames
+  char filenames[100][11];  // Store up to 100 filenames, max 10 chars each (YYYY-MM-DD.csv = 14 chars, but we'll keep it safe)
+  int file_count = 0;
+
+  SdFile file;
+  while (file.openNext(&root, O_RDONLY) && file_count < 100) {
+    char name[32];
+    file.getName(name, sizeof(name));
+
+    // Check if filename matches YYYY-MM-DD.csv pattern (14 chars exactly)
+    if (strlen(name) == 14 && name[4] == '-' && name[7] == '-' &&
+        name[10] == '.' && name[11] == 'c' && name[12] == 's' && name[13] == 'v') {
+      strncpy(filenames[file_count], name, 10);
+      filenames[file_count][10] = '\0';
+      file_count++;
+    }
+    file.close();
+  }
+  root.close();
+
+  if (file_count == 0) {
+    Serial.println("No per-day CSV files found yet");
+  } else {
+    // Sort filenames alphabetically (simple bubble sort for small lists)
+    for (int i = 0; i < file_count - 1; i++) {
+      for (int j = i + 1; j < file_count; j++) {
+        if (strcmp(filenames[i], filenames[j]) > 0) {
+          char temp[11];
+          strcpy(temp, filenames[i]);
+          strcpy(filenames[i], filenames[j]);
+          strcpy(filenames[j], temp);
+        }
+      }
+    }
+
+    // Print sorted list
+    for (int i = 0; i < file_count; i++) {
+      Serial.print("  [");
+      Serial.print(i + 1);
+      Serial.print("] ");
+      Serial.println(filenames[i]);
+    }
+  }
+  Serial.println("===================================\n");
+}
+
 // Load historical data from per-day CSV files or legacy data.csv
 bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
                        RingF &gasSeries, RingF &slpTrend) {
@@ -1020,26 +1091,27 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
     return false;
   }
 
+  // Per-day CSV files (YYYY-MM-DD.csv) are loaded on-demand via API endpoints
+  // This avoids loading all historical data at startup
+  // Legacy data.csv support: if it exists, load it into ring buffers for live display
+
   uint32_t total_samples = 0;
 
-  // Try to load recent per-day files (last 7 days)
-  // Note: This runs before NTP sync, so we load a limited amount
-  Serial.println("Loading recent daily CSV files...");
-
-  // First, try to load from legacy data.csv if no daily files exist
-  // This provides backward compatibility
   if (sd.exists("data.csv")) {
-    Serial.println("Loading legacy data.csv...");
+    Serial.println("Found legacy data.csv - loading for live display...");
     uint32_t samples = loadCSVFile("data.csv", tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
     total_samples += samples;
     Serial.print("Loaded ");
     Serial.print(samples);
     Serial.println(" samples from legacy data.csv");
   } else {
-    Serial.println("No data.csv found. Daily files will be loaded on-demand.");
+    Serial.println("Per-day CSV files ready for on-demand loading (YYYY-MM-DD.csv)");
   }
 
   sd_info.logged_samples = total_samples;
+
+  // List all available CSV files
+  listCSVFiles();
 
   return true;
 }
@@ -1131,17 +1203,6 @@ void setup() {
     Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
   }
 
-  // Wait a bit for WiFi to connect, then sync time
-  Serial.println("Waiting for WiFi to connect for time sync...");
-  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-    delay(250);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    configureNTPTime();
-  } else {
-    Serial.println("[Setup] WiFi not ready yet, time will be synced in the background");
-  }
-
   last_env_ms = millis() - ENV_INTERVAL_MS;
   last_gas_ms = millis() - GAS_INTERVAL_MS;
   last_slp_trend_ms = millis() - SLP_TREND_SAMPLE_MS;
@@ -1161,6 +1222,12 @@ void loop() {
 
   // Check WiFi status and attempt reconnection if needed
   updateWiFiStatus(ssid, pass);
+
+  // Sync time via NTP once WiFi is connected (happens once)
+  if (!ntp_sync_attempted && WiFi.status() == WL_CONNECTED) {
+    ntp_sync_attempted = true;
+    configureNTPTime();
+  }
 
   // Calculate loop rate (update every second)
   loop_count++;
