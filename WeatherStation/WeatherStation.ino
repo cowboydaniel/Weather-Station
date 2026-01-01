@@ -25,6 +25,7 @@
 // ================= USER CONFIG =================
 const char ssid[] = "outback_hut";
 const char pass[] = "wildmonkeys2810";
+const char device_name[] = "weather-station";  // Device name for WiFi network
 const float ALTITUDE_M = 242.0f;
 // ===============================================
 
@@ -527,6 +528,7 @@ static void sendJSONStats(WiFiClient &c) {
   c.print("\"connected\":"); c.print(WiFi.status() == WL_CONNECTED ? "true" : "false"); c.print(",");
   c.print("\"ip\":\""); c.print(ip); c.print("\",");
   c.print("\"ssid\":\""); c.print(ssid); c.print("\",");
+  c.print("\"device_name\":\""); c.print(device_name); c.print("\",");
   c.print("\"rssi\":"); c.print(rssi); c.print(",");
 
   // MAC address
@@ -828,7 +830,7 @@ void loop() {
   updateSampling();
 
   // Check WiFi status and attempt reconnection if needed
-  updateWiFiStatus(ssid, pass);
+  updateWiFiStatus(ssid, pass, device_name);
 
   // Calculate loop rate (update every second)
   loop_count++;
