@@ -57,46 +57,73 @@ function drawLineSeries(ctx, cv, series, opts={}){
   }
 
   // Draw X-axis ticks and labels based on interval
-  drawXAxisTicks(ctx, w, h, series.length, opts.interval_ms, opts.timeMode, opts.timestamps);
+  drawXAxisTicks(ctx, w, h, series.length, opts.interval_ms, opts.timeMode, opts.timestamps, opts.expectedDurationMs);
+
+  // Calculate x-positions based on timestamps and expected duration for absolute time mode
+  let getX;
+  if (opts.timeMode === 'absolute' && Array.isArray(opts.timestamps) && opts.timestamps.length === series.length && opts.expectedDurationMs) {
+    // For 24-hour view with timestamps: position data relative to start of day
+    const firstTimestamp = opts.timestamps[0];
+    const dayStart = new Date(firstTimestamp);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayStartMs = dayStart.getTime();
+    const expectedDurationMs = opts.expectedDurationMs;
+
+    getX = (i) => {
+      const timestamp = opts.timestamps[i];
+      const elapsed = timestamp - dayStartMs;
+      return (elapsed / expectedDurationMs) * w;
+    };
+  } else {
+    // Original behavior: spread points evenly across canvas
+    getX = (i) => (i / (series.length - 1)) * w;
+  }
 
   ctx.lineWidth = 3;
   ctx.strokeStyle = 'rgba(255,255,255,0.88)';
   ctx.beginPath();
+  let started = false;
   for(let i=0;i<series.length;i++){
     const v = (typeof series[i] === 'number' && isFinite(series[i])) ? series[i] : null;
-    const x = (i/(series.length-1))*w;
+    const x = getX(i);
     const y = v===null ? h/2 : (h - ((v - min)/rng)*h);
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    if(!started) { ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
   }
   ctx.stroke();
 
-  ctx.globalAlpha = 0.10;
-  ctx.fillStyle = 'rgba(255,255,255,1)';
-  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath();
-  ctx.fill();
-  ctx.globalAlpha = 1;
+  // Fill under the curve
+  if (started && series.length > 0) {
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    const lastX = getX(series.length - 1);
+    const firstX = getX(0);
+    ctx.lineTo(lastX, h);
+    ctx.lineTo(firstX, h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
 
-  return {min: dataMin, max: dataMax, last: data[data.length-1], data: series, min: min, max: max, range: rng};
+  return {min: dataMin, max: dataMax, last: data[data.length-1], data: series, min: min, max: max, range: rng, getX: getX};
 }
 
-function drawXAxisTicks(ctx, w, h, numPoints, interval_ms, timeMode, timestamps){
+function drawXAxisTicks(ctx, w, h, numPoints, interval_ms, timeMode, timestamps, expectedDurationMs){
   if (!interval_ms || numPoints < 2) return;
 
   const HOURLY_MS = 3600000;
   let tickCount, tickLabel;
 
-  if (timeMode === 'absolute' && Array.isArray(timestamps) && timestamps.length === numPoints) {
-    // Absolute time mode for 24-hour data with real timestamps
-    tickCount = Math.min(5, numPoints - 1);
-    const firstTime = timestamps[0];
-    const lastTime = timestamps[numPoints - 1];
+  if (timeMode === 'absolute' && expectedDurationMs) {
+    // Absolute time mode for 24-hour data: show full day axis from 00:00 to 24:00
+    const hoursInDuration = expectedDurationMs / HOURLY_MS;
+    tickCount = Math.min(6, hoursInDuration);
+
+    // Calculate hours per tick (e.g., 4 hours for 24hr view with 6 ticks)
+    const hoursPerTick = hoursInDuration / tickCount;
 
     tickLabel = (idx) => {
-      const timeIdx = Math.round((idx / tickCount) * (numPoints - 1));
-      const timestamp = timestamps[timeIdx];
-      if (!timestamp) return '';
-      const date = new Date(timestamp);
-      return date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0');
+      const hours = Math.round(idx * hoursPerTick);
+      return hours.toString().padStart(2, '0') + ':00';
     };
   } else if (interval_ms >= HOURLY_MS) {
     // Relative time for hourly data
@@ -163,11 +190,14 @@ function startSimpleSeriesPage(cfg){
   tooltip.className = 'hover-tooltip';
   document.body.appendChild(tooltip);
 
-  const render = (series, interval_ms, timeMode, timestamps) => {
+  let lastExpectedDurationMs = null;
+
+  const render = (series, interval_ms, timeMode, timestamps, expectedDurationMs) => {
     lastInterval = interval_ms;
     lastSeries = series;
     lastTimeMode = timeMode;
     lastTimestamps = timestamps;
+    lastExpectedDurationMs = expectedDurationMs;
     const stats = drawLineSeries(chart.ctx, chart.cv, series, {
       fixedMin: cfg.fixedMin,
       fixedMax: cfg.fixedMax,
@@ -175,7 +205,8 @@ function startSimpleSeriesPage(cfg){
       minPad: cfg.minPad,
       interval_ms: interval_ms,
       timeMode: timeMode,
-      timestamps: timestamps
+      timestamps: timestamps,
+      expectedDurationMs: expectedDurationMs
     });
     lastStats = stats;
     if (!stats) return;
@@ -197,8 +228,39 @@ function startSimpleSeriesPage(cfg){
     const dpr = window.devicePixelRatio || 1;
     const relXScaled = relX * dpr;
 
-    const idx = Math.round((relXScaled / w) * (lastSeries.length - 1));
-    const clampedIdx = Math.max(0, Math.min(lastSeries.length - 1, idx));
+    let clampedIdx;
+    if (lastTimeMode === 'absolute' && lastExpectedDurationMs && Array.isArray(lastTimestamps) && lastTimestamps.length > 0) {
+      // For absolute time mode, find the closest data point to the mouse position
+      // Convert mouse x position to time offset within the day
+      const firstTimestamp = lastTimestamps[0];
+      const dayStart = new Date(firstTimestamp);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayStartMs = dayStart.getTime();
+      const mouseTimeOffset = (relXScaled / w) * lastExpectedDurationMs;
+      const mouseTimestamp = dayStartMs + mouseTimeOffset;
+
+      // Find closest data point
+      let minDist = Infinity;
+      clampedIdx = 0;
+      for (let i = 0; i < lastTimestamps.length; i++) {
+        const dist = Math.abs(lastTimestamps[i] - mouseTimestamp);
+        if (dist < minDist) {
+          minDist = dist;
+          clampedIdx = i;
+        }
+      }
+
+      // Hide tooltip if mouse is too far from any data point (e.g., in blank area)
+      const dataPointX = lastStats.getX ? lastStats.getX(clampedIdx) : (clampedIdx / (lastSeries.length - 1)) * w;
+      if (Math.abs(relXScaled - dataPointX) > w * 0.02) { // Within 2% of canvas width
+        tooltip.classList.remove('visible');
+        return;
+      }
+    } else {
+      const idx = Math.round((relXScaled / w) * (lastSeries.length - 1));
+      clampedIdx = Math.max(0, Math.min(lastSeries.length - 1, idx));
+    }
+
     const value = lastSeries[clampedIdx];
 
     if (typeof value !== 'number' || !isFinite(value)) {
@@ -228,7 +290,7 @@ function startSimpleSeriesPage(cfg){
       const r = await fetch(cfg.endpoint, {cache:'no-store'});
       const j = await r.json();
       if(!j.ok) return;
-      render(j.series || [], j.interval_ms, j.timeMode, j.timestamps);
+      render(j.series || [], j.interval_ms, j.timeMode, j.timestamps, cfg.expectedDurationMs);
     }catch(e){}
   };
   tick();
