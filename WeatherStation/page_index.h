@@ -26,7 +26,7 @@ static void sendPageIndex(WiFiClient &client) {
   <header>
     <div>
       <h1>UNO R4 Weather Station</h1>
-      <div class="sub">Tap a card to open the full graph page. Comfort has its own page too.</div>
+      <div class="sub">Tap a card to view graphs. Use timeframe menu for 1min, 5min, 10min, or 24hr views.</div>
     </div>
 
     <div style="display:flex; gap:12px; align-items:center;">
@@ -49,21 +49,21 @@ static void sendPageIndex(WiFiClient &client) {
   </header>
 
   <div class="grid">
-    <a class="card" href="/temp">
+    <a class="card" href="/graphs">
       <div class="label">Temperature</div>
       <div class="big"><span id="t">--</span><span class="unit">°C</span></div>
       <div class="pair"><span>Raw</span><b id="t_raw">--</b></div>
-      <div class="footer">10-minute history (1 Hz).</div>
+      <div class="footer">Tap for all graphs</div>
     </a>
 
-    <a class="card" href="/humidity">
+    <a class="card" href="/graphs">
       <div class="label">Humidity</div>
       <div class="big"><span id="h">--</span><span class="unit">%</span></div>
       <div class="pair"><span>Raw</span><b id="h_raw">--</b></div>
-      <div class="footer">10-minute history (1 Hz).</div>
+      <div class="footer">Tap for all graphs</div>
     </a>
 
-    <a class="card" href="/pressure">
+    <a class="card" href="/graphs">
       <div class="label">Sea-level Pressure</div>
       <div class="big"><span id="slp">--</span><span class="unit">hPa</span></div>
       <div class="pair"><span>Tendency</span><b id="pt">--</b></div>
@@ -76,10 +76,10 @@ static void sendPageIndex(WiFiClient &client) {
           <polyline id="slpLine" points=""></polyline>
         </svg>
       </div>
-      <div class="footer">Sea-level pressure trend (minute samples). Points: <span id="trend_pts">--</span></div>
+      <div class="footer">Tap for all graphs</div>
     </a>
 
-    <a class="card" href="/gas">
+    <a class="card" href="/graphs">
       <div class="label">Gas Resistance</div>
       <div class="big"><span id="g">--</span><span class="unit">kΩ</span></div>
       <div class="pair"><span>Raw</span><b id="g_raw">--</b></div>
@@ -91,7 +91,7 @@ static void sendPageIndex(WiFiClient &client) {
           <polyline id="gasLine" points=""></polyline>
         </svg>
       </div>
-      <div class="footer">Gas history (3-second samples).</div>
+      <div class="footer">Tap for all graphs</div>
     </a>
 
     <a class="card" href="/comfort">

@@ -16,10 +16,7 @@
 
 // Pages (HTML lives in these headers)
 #include "page_index.h"
-#include "page_temp.h"
-#include "page_humidity.h"
-#include "page_pressure.h"
-#include "page_gas.h"
+#include "page_graphs.h"
 #include "page_comfort.h"
 #include "page_derived.h"
 #include "page_settings.h"
@@ -1377,17 +1374,18 @@ void loop() {
   } else if (reqLine.startsWith("GET /static/favicon.svg") || reqLine.startsWith("GET /favicon.ico")) {
     sendStaticFavicon(client);
     isPage = true;
-  } else if (reqLine.startsWith("GET /temp")) {
-    sendPageTemp(client);
+  } else if (reqLine.startsWith("GET /graphs/1m")) {
+    sendPageGraphs1m(client);
     isPage = true;
-  } else if (reqLine.startsWith("GET /humidity")) {
-    sendPageHumidity(client);
+  } else if (reqLine.startsWith("GET /graphs/5m")) {
+    sendPageGraphs5m(client);
     isPage = true;
-  } else if (reqLine.startsWith("GET /pressure")) {
-    sendPagePressure(client);
+  } else if (reqLine.startsWith("GET /graphs/24h")) {
+    sendPageGraphs24h(client);
     isPage = true;
-  } else if (reqLine.startsWith("GET /gas")) {
-    sendPageGas(client);
+  } else if (reqLine.startsWith("GET /graphs")) {
+    // Default graphs page is 10 minutes
+    sendPageGraphs10m(client);
     isPage = true;
   } else if (reqLine.startsWith("GET /comfort")) {
     sendPageComfort(client);
