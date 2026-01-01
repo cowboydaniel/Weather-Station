@@ -118,9 +118,7 @@ function renderCalendar() {
       pageState.selectedDate = e.target.dataset.date;
       renderCalendar();
       $('datePickerBtn').textContent = pageState.selectedDate;
-      if (pageState.page && pageState.page.tick) {
-        pageState.page.tick();
-      }
+      recreatePage();
     });
   });
 }
@@ -129,6 +127,7 @@ function toggleCalendar() {
   const container = $('calendarContainer');
   if (container) {
     if (pageState.selectedTimeframe === 86400) {
+      renderCalendar();
       container.classList.toggle('visible');
     } else {
       container.classList.remove('visible');
@@ -142,12 +141,32 @@ function loadAvailableDates() {
     .then(data => {
       if (data.ok && Array.isArray(data.dates)) {
         pageState.availableDates = data.dates;
-        if (pageState.selectedTimeframe === 86400) {
-          renderCalendar();
-        }
+        renderCalendar();
       }
     })
     .catch(e => console.log('Could not load dates:', e));
+}
+
+function recreatePage() {
+  if (pageState.page && pageState.page.intervalId) {
+    clearInterval(pageState.page.intervalId);
+  }
+  pageState.page = startSimpleSeriesPage({
+    endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate, pageState.selectedTimeframe),
+    canvasId:'cv',
+    unit:' %',
+    decimals:1,
+    pollMs:2000,
+    height:360,
+    fixedMin:0,
+    fixedMax:100,
+    padFraction:0,
+    minPad:0,
+    nowId:'now',
+    avgId:'avgv',
+    minId:'minv',
+    maxId:'maxv'
+  });
 }
 
 const timeframeSelect = $('timeframeSelect');
@@ -164,9 +183,7 @@ if (timeframeSelect) {
     pageState.selectedDate = '';
     $('datePickerBtn').textContent = 'Today (Live)';
     toggleCalendar();
-    if (pageState.page && pageState.page.tick) {
-      pageState.page.tick();
-    }
+    recreatePage();
   });
 }
 

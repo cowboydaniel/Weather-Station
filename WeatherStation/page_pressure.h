@@ -131,6 +131,7 @@ function toggleCalendar() {
   const container = $('calendarContainer');
   if (container) {
     if (pageState.selectedTimeframe === 86400) {
+      renderCalendar();
       container.classList.toggle('visible');
     } else {
       container.classList.remove('visible');
@@ -144,9 +145,7 @@ function loadAvailableDates() {
     .then(data => {
       if (data.ok && Array.isArray(data.dates)) {
         pageState.availableDates = data.dates;
-        if (pageState.selectedTimeframe === 86400) {
-          renderCalendar();
-        }
+        renderCalendar();
       }
     })
     .catch(e => console.log('Could not load dates:', e));
@@ -190,7 +189,9 @@ async function tick(){
     drawLineSeries(slpTrendChart.ctx, slpTrendChart.cv, j.slp_trend_series || [], {padFraction:0.15, minPad:0.2, interval_ms: j.slp_trend_interval_ms});
   }catch(e){}
 }
-tick(); setInterval(tick, 2000);
+let pressureIntervalId;
+tick();
+pressureIntervalId = setInterval(tick, 2000);
 toggleCalendar();
 loadAvailableDates();
 </script>
