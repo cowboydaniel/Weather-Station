@@ -24,7 +24,7 @@
 #include "page_derived.h"
 #include "page_settings.h"
 #include "page_stats.h"
-#include "static_assets.h"
+// #include "static_assets.h"  -- REMOVED: static assets now served from SD card
 
 // ================= USER CONFIG =================
 const char ssid[] = "outbackhut";
@@ -773,31 +773,47 @@ static void sendJSONStats(WiFiClient &c) {
 }
 
 // Static assets
-static void sendStaticCSS(WiFiClient &c) {
+// Serve static files from SD card
+static void sendStaticFile(WiFiClient &c, const char* filename, const char* mimeType) {
+  // Try to open file from SD card
+  SdFile file;
+  if (!file.open(filename, O_RDONLY)) {
+    c.println("HTTP/1.1 404 Not Found");
+    c.println("Content-Type: text/plain; charset=utf-8");
+    c.println("Connection: close");
+    c.println();
+    c.println("404");
+    return;
+  }
+
   c.println("HTTP/1.1 200 OK");
-  c.println("Content-Type: text/css; charset=utf-8");
+  c.print("Content-Type: ");
+  c.println(mimeType);
   c.println("Cache-Control: public, max-age=31536000, immutable");
   c.println("Connection: close");
   c.println();
-  c.print(APP_CSS);
+
+  // Stream file to client
+  while (file.available()) {
+    byte buf[256];
+    int n = file.read(buf, sizeof(buf));
+    if (n > 0) {
+      c.write(buf, n);
+    }
+  }
+  file.close();
+}
+
+static void sendStaticCSS(WiFiClient &c) {
+  sendStaticFile(c, "app.css", "text/css; charset=utf-8");
 }
 
 static void sendStaticJS(WiFiClient &c) {
-  c.println("HTTP/1.1 200 OK");
-  c.println("Content-Type: application/javascript; charset=utf-8");
-  c.println("Cache-Control: public, max-age=31536000, immutable");
-  c.println("Connection: close");
-  c.println();
-  c.print(APP_JS);
+  sendStaticFile(c, "app.js", "application/javascript; charset=utf-8");
 }
 
 static void sendStaticFavicon(WiFiClient &c) {
-  c.println("HTTP/1.1 200 OK");
-  c.println("Content-Type: image/svg+xml");
-  c.println("Cache-Control: public, max-age=31536000, immutable");
-  c.println("Connection: close");
-  c.println();
-  c.print(FAVICON_SVG);
+  sendStaticFile(c, "favicon.svg", "image/svg+xml");
 }
 
 // Basic 404
