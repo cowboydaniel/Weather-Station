@@ -61,13 +61,13 @@ static void sendPageHumidity(WiFiClient &client) {
             <button class="calendar-nav-btn" id="nextMonth" aria-label="Next month">›</button>
           </div>
           <div class="calendar-weekdays">
-            <div class="calendar-weekday-label">Sun</div>
             <div class="calendar-weekday-label">Mon</div>
             <div class="calendar-weekday-label">Tue</div>
             <div class="calendar-weekday-label">Wed</div>
             <div class="calendar-weekday-label">Thu</div>
             <div class="calendar-weekday-label">Fri</div>
             <div class="calendar-weekday-label">Sat</div>
+            <div class="calendar-weekday-label">Sun</div>
           </div>
           <div class="calendar-days" id="calendarDays"></div>
         </div>
@@ -112,7 +112,11 @@ function renderCalendarDays() {
   const month = pageState.calendarMonth;
   const today = new Date();
 
-  const firstDay = new Date(year, month, 1).getDay();
+  // Get first day of month (0=Sunday, 1=Monday, ... 6=Saturday)
+  // Convert to Monday-first (0=Monday, ... 6=Sunday)
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const mondayFirstDay = (firstDayOfMonth === 0) ? 6 : firstDayOfMonth - 1;
+
   const lastDay = new Date(year, month + 1, 0).getDate();
   const prevMonthLastDay = new Date(year, month, 0).getDate();
 
@@ -122,8 +126,8 @@ function renderCalendarDays() {
   const calendarDaysEl = $('calendarDays');
   calendarDaysEl.innerHTML = '';
 
-  // Previous month's days
-  for (let i = firstDay - 1; i >= 0; i--) {
+  // Previous month's days (to fill from Monday)
+  for (let i = mondayFirstDay - 1; i >= 0; i--) {
     const day = prevMonthLastDay - i;
     const el = document.createElement('div');
     el.className = 'calendar-day other-month';
@@ -159,7 +163,7 @@ function renderCalendarDays() {
     calendarDaysEl.appendChild(el);
   }
 
-  // Next month's days
+  // Next month's days (to fill to complete weeks)
   const totalCells = calendarDaysEl.children.length;
   const remainingCells = (7 - (totalCells % 7)) % 7;
   for (let day = 1; day <= remainingCells; day++) {
@@ -250,6 +254,13 @@ if (closeBtn) {
 if (calendarModal) {
   calendarModal.querySelector('.calendar-modal-overlay').addEventListener('click', closeCalendarModal);
 }
+
+// Escape key to close modal
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeCalendarModal();
+  }
+});
 
 // Timeframe select listener
 const timeframeSelect = $('timeframeSelect');
