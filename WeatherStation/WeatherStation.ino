@@ -3,6 +3,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h>
 #include <math.h>
+#include <time.h>
 
 // SD card logging with software SPI
 #include "sd_logging.h"
@@ -27,6 +28,8 @@ const char ssid[] = "outback_hut";
 const char pass[] = "wildmonkeys2810";
 const char device_name[] = "weather-station";  // Device name for WiFi network
 const float ALTITUDE_M = 242.0f;
+// Timezone: AEST is UTC+10, AEDT (daylight) is UTC+11
+const char* timezone_str = "AEST-10AEDT,M10.1.0,M4.1.0";  // Australian Eastern Time
 // ===============================================
 
 WiFiServer server(80);
@@ -794,29 +797,126 @@ static void send404(WiFiClient &c) {
   c.println("404");
 }
 
+// ============ PER-DATE DATA FETCH ============
+// Fetch sensor data for a specific date (YYYY-MM-DD) and return as JSON
+static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* metric) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  // Try to open the daily CSV file
+  char filename[32];
+  dateStr.toCharArray(filename, sizeof(filename) - 5);
+  strcat(filename, ".csv");
+
+  if (!logFile.open(filename, O_RDONLY)) {
+    c.print("{\"ok\":false,\"error\":\"Date not found\"}");
+    return;
+  }
+
+  // Determine which field to extract based on metric
+  int metric_field = -1;
+  if (strcmp(metric, "temp") == 0) metric_field = 1;
+  else if (strcmp(metric, "humidity") == 0) metric_field = 2;
+  else if (strcmp(metric, "pressure") == 0) metric_field = 3;
+  else if (strcmp(metric, "gas") == 0) metric_field = 9;
+
+  if (metric_field < 0) {
+    logFile.close();
+    c.print("{\"ok\":false,\"error\":\"Invalid metric\"}");
+    return;
+  }
+
+  c.print("{\"ok\":true,\"unit\":");
+  if (metric_field == 1) c.print("\"C\"");
+  else if (metric_field == 2) c.print("\"%\"");
+  else if (metric_field == 3) c.print("\"hPa\"");
+  else c.print("\"kOhm\"");
+  c.print(",\"interval_ms\":1000,\"data\":[");
+
+  // Parse and output data with timestamps
+  char line[128];
+  int line_len = 0;
+  bool first_data = true;
+  int line_count = 0;
+
+  while (logFile.available() && line_count < 100000) {  // Safety limit
+    int c_byte = logFile.read();
+
+    if (c_byte == '\n' || c_byte == -1) {
+      if (line_len > 0) {
+        line[line_len] = '\0';
+
+        // Skip header
+        if (line[0] < '0' || line[0] > '9') {
+          line_len = 0;
+          if (c_byte == -1) break;
+          continue;
+        }
+
+        // Parse line to extract timestamp and metric value
+        unsigned long ts = 0;
+        float value = NAN;
+        int field = 0;
+        int start = 0;
+        char field_str[32];
+
+        for (int i = 0; i <= line_len; i++) {
+          if (line[i] == ',' || line[i] == '\0') {
+            int len = i - start;
+            if (len > 0 && len < (int)sizeof(field_str)) {
+              strncpy(field_str, &line[start], len);
+              field_str[len] = '\0';
+
+              if (field == 0) {
+                ts = strtoul(field_str, NULL, 10);
+              } else if (field == metric_field) {
+                value = strtof(field_str, NULL);
+                break;  // Got what we need
+              }
+            }
+            field++;
+            start = i + 1;
+          }
+        }
+
+        // Output as [timestamp, value] pair
+        if (isfinite(value)) {
+          if (!first_data) c.print(",");
+          c.print("[");
+          c.print(ts);
+          c.print(",");
+          c.print(value, 2);
+          c.print("]");
+          first_data = false;
+        }
+
+        line_count++;
+      }
+
+      line_len = 0;
+      if (c_byte == -1) break;
+    } else if (c_byte >= 32 && c_byte < 127) {
+      if (line_len < sizeof(line) - 1) {
+        line[line_len++] = c_byte;
+      }
+    }
+  }
+
+  logFile.close();
+  c.println("]}");
+}
+
 // ============ LOAD HISTORY FROM CSV (implementation) ============
-bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
-                       RingF &gasSeries, RingF &slpTrend) {
-  if (!sd_info.initialized) {
-    Serial.println("SD card not initialized");
-    return false;
+// Helper to load and parse a single CSV file
+static uint32_t loadCSVFile(const char* filename,
+                            RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
+                            RingF &gasSeries, RingF &slpTrend) {
+  if (!logFile.open(filename, O_RDONLY)) {
+    return 0;
   }
-
-  // Check if file exists
-  if (!sd.exists("data.csv")) {
-    Serial.println("No existing data.csv found, starting fresh");
-    sd_info.logged_samples = 0;
-    return true;
-  }
-
-  // Open existing file for reading
-  if (!logFile.open("data.csv", O_RDONLY)) {
-    strcpy(sd_info.error_msg, "Cannot open data.csv");
-    Serial.println("Failed to open data.csv");
-    return false;
-  }
-
-  Serial.println("Loading historical data from CSV...");
 
   uint32_t sample_count = 0;
   uint32_t skipped_lines = 0;
@@ -835,9 +935,7 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
         // Skip header line (if first line contains non-numeric data)
         if (first_line) {
           first_line = false;
-          // Check if this looks like a header (starts with 't' from "timestamp_ms")
           if (line[0] < '0' || line[0] > '9') {
-            Serial.println("Skipping CSV header line");
             skipped_lines++;
             line_len = 0;
             if (c == -1) break;
@@ -845,15 +943,11 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
         }
 
-        // Parse CSV using manual field extraction (handles both old and new formats)
-        // New Format (10 fields): timestamp_ms,temp_c,humidity_pct,pressure_station_hpa,pressure_sealevel_hpa,
-        //                         dew_point_c,heat_index_c,pressure_tendency_hpa_per_3h,storm_score,gas_kohm
-        // Old Format (5 fields): timestamp_ms,temp_c,humidity_pct,pressure_hpa,gas_kohm
+        // Parse CSV
         unsigned long ts = 0;
         float temp = NAN, hum = NAN, press_station = NAN, press_slp = NAN;
         float dp = NAN, hi = NAN, tend = NAN, storm = NAN, gas = NAN;
 
-        // Find commas and extract fields
         int field = 0;
         int start = 0;
         char field_str[32];
@@ -861,24 +955,17 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
 
         for (int i = 0; i <= line_len; i++) {
           if (line[i] == ',' || line[i] == '\0') {
-            // Extract field
             int len = i - start;
             if (len > 0 && len < (int)sizeof(field_str)) {
               strncpy(field_str, &line[start], len);
               field_str[len] = '\0';
 
-              // Parse field based on its position
               switch(field) {
                 case 0: ts = strtoul(field_str, NULL, 10); parsed++; break;
                 case 1: temp = strtof(field_str, NULL); parsed++; break;
                 case 2: hum = strtof(field_str, NULL); parsed++; break;
                 case 3: press_station = strtof(field_str, NULL); parsed++; break;
-                case 4:
-                  // Field 4 could be either gas_kohm (old 5-field format) or pressure_sealevel_hpa (new 10-field)
-                  // We'll treat it as pressure_sealevel_hpa and set gas later if only 5 fields
-                  press_slp = strtof(field_str, NULL);
-                  parsed++;
-                  break;
+                case 4: press_slp = strtof(field_str, NULL); parsed++; break;
                 case 5: dp = strtof(field_str, NULL); parsed++; break;
                 case 6: hi = strtof(field_str, NULL); parsed++; break;
                 case 7: tend = strtof(field_str, NULL); parsed++; break;
@@ -891,43 +978,30 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
           }
         }
 
-        // For backwards compatibility: if only 5 fields, field[4] was gas, not SLP
-        if (field == 5) {
-          gas = press_slp;  // Field 4 was actually gas
-          press_slp = press_station;  // No SLP data, use station pressure as fallback
+        if (field == 5) {  // Old format
+          gas = press_slp;
+          press_slp = press_station;
         }
 
         if (parsed >= 4 && isfinite(temp) && isfinite(hum) && isfinite(press_station)) {
-          // Push to ring buffers (they auto-wrap when full)
           tempSeries.push(temp);
           humSeries.push(hum);
           pressSeries.push(press_station);
-
           if (isfinite(gas)) {
             gasSeries.push(gas);
           }
-
-          // Push SLP trend if available (new format only)
           if (field >= 5 && isfinite(press_slp)) {
             slpTrend.push(press_slp);
           }
-
           sample_count++;
-        } else if (parsed < 4) {
-          // Debug: log lines that failed to parse
-          Serial.print("Parse failed (got ");
-          Serial.print(parsed);
-          Serial.print(" fields, ");
-          Serial.print(field);
-          Serial.print(" total): ");
-          Serial.println(line);
+        } else {
           skipped_lines++;
         }
       }
 
       line_len = 0;
       if (c == -1) break;
-    } else if (c >= 32 && c < 127) {  // Printable ASCII
+    } else if (c >= 32 && c < 127) {
       if (line_len < sizeof(line) - 1) {
         line[line_len++] = c;
       }
@@ -935,17 +1009,87 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
   }
 
   logFile.close();
+  return sample_count;
+}
 
-  sd_info.logged_samples = sample_count;
-  sd_info.file_size = logFile.size();
+// Load historical data from per-day CSV files or legacy data.csv
+bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
+                       RingF &gasSeries, RingF &slpTrend) {
+  if (!sd_info.initialized) {
+    Serial.println("SD card not initialized");
+    return false;
+  }
 
-  Serial.print("Loaded ");
-  Serial.print(sample_count);
-  Serial.print(" samples from SD card (skipped ");
-  Serial.print(skipped_lines);
-  Serial.println(" lines)");
+  uint32_t total_samples = 0;
+
+  // Try to load recent per-day files (last 7 days)
+  // Note: This runs before NTP sync, so we load a limited amount
+  Serial.println("Loading recent daily CSV files...");
+
+  // First, try to load from legacy data.csv if no daily files exist
+  // This provides backward compatibility
+  if (sd.exists("data.csv")) {
+    Serial.println("Loading legacy data.csv...");
+    uint32_t samples = loadCSVFile("data.csv", tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
+    total_samples += samples;
+    Serial.print("Loaded ");
+    Serial.print(samples);
+    Serial.println(" samples from legacy data.csv");
+  } else {
+    Serial.println("No data.csv found. Daily files will be loaded on-demand.");
+  }
+
+  sd_info.logged_samples = total_samples;
 
   return true;
+}
+
+// ============ NTP TIME CONFIGURATION ============
+// Configure time via NTP (requires WiFi connection)
+static bool configureNTPTime() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Time] WiFi not connected, cannot sync time");
+    return false;
+  }
+
+  Serial.println("[Time] Syncing time via NTP...");
+  // Set timezone
+  setenv("TZ", timezone_str, 1);
+  tzset();
+
+  // Configure time with NTP
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+
+  // Wait up to 10 seconds for time to sync
+  time_t now = time(nullptr);
+  int attempts = 0;
+  while (now < 24 * 3600 && attempts < 100) {  // Time should be after Jan 1, 1970 00:00:24
+    delay(100);
+    now = time(nullptr);
+    attempts++;
+  }
+
+  if (now > 24 * 3600) {
+    Serial.print("[Time] NTP sync successful. Current time: ");
+    Serial.println(ctime(&now));
+    return true;
+  } else {
+    Serial.println("[Time] NTP sync timeout");
+    return false;
+  }
+}
+
+// Get current date as YYYY-MM-DD string
+static void getCurrentDateString(char* dateStr, int maxLen) {
+  time_t now = time(nullptr);
+  struct tm* timeinfo = localtime(&now);
+  strftime(dateStr, maxLen, "%Y-%m-%d", timeinfo);
+}
+
+// Get current timestamp in milliseconds (real clock time, not millis())
+static unsigned long getCurrentTimeMs() {
+  time_t now = time(nullptr);
+  return (unsigned long)now * 1000;  // Convert seconds to milliseconds
 }
 
 void setup() {
@@ -984,6 +1128,17 @@ void setup() {
     loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
   } else {
     Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
+  }
+
+  // Wait a bit for WiFi to connect, then sync time
+  Serial.println("Waiting for WiFi to connect for time sync...");
+  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
+    delay(250);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    configureNTPTime();
+  } else {
+    Serial.println("[Setup] WiFi not ready yet, time will be synced in the background");
   }
 
   last_env_ms = millis() - ENV_INTERVAL_MS;
@@ -1107,6 +1262,46 @@ void loop() {
     isApi = true;
   } else if (reqLine.startsWith("GET /api/available-dates")) {
     sendAvailableDates(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/temp-date")) {
+    // Date-specific temperature: /api/temp-date?date=YYYY-MM-DD
+    char dateStr[16] = "";
+    if (extractDateParam(reqLine, dateStr, sizeof(dateStr))) {
+      sendJSONDateData(client, String(dateStr), "temp");
+    } else {
+      send404(client);
+      isError = true;
+    }
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/humidity-date")) {
+    // Date-specific humidity: /api/humidity-date?date=YYYY-MM-DD
+    char dateStr[16] = "";
+    if (extractDateParam(reqLine, dateStr, sizeof(dateStr))) {
+      sendJSONDateData(client, String(dateStr), "humidity");
+    } else {
+      send404(client);
+      isError = true;
+    }
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/pressure-date")) {
+    // Date-specific pressure: /api/pressure-date?date=YYYY-MM-DD
+    char dateStr[16] = "";
+    if (extractDateParam(reqLine, dateStr, sizeof(dateStr))) {
+      sendJSONDateData(client, String(dateStr), "pressure");
+    } else {
+      send404(client);
+      isError = true;
+    }
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/gas-date")) {
+    // Date-specific gas: /api/gas-date?date=YYYY-MM-DD
+    char dateStr[16] = "";
+    if (extractDateParam(reqLine, dateStr, sizeof(dateStr))) {
+      sendJSONDateData(client, String(dateStr), "gas");
+    } else {
+      send404(client);
+      isError = true;
+    }
     isApi = true;
   } else if (reqLine.startsWith("GET /api/temp-hourly")) {
     sendJSONTempHourly(client);

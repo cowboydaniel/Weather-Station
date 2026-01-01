@@ -31,8 +31,6 @@ static void sendPageTemp(WiFiClient &client) {
   <div class="card">
     <div class="kpis">
       <div class="kpi">Now: <b id="now">--</b></div>
-      <div class="kpi">Min: <b id="minv">--</b></div>
-      <div class="kpi">Max: <b id="maxv">--</b></div>
       <div style="flex: 1;"></div>
       <div class="kpi">
         Date:
@@ -43,6 +41,11 @@ static void sendPageTemp(WiFiClient &client) {
     </div>
     <div style="margin-top:12px">
       <canvas id="cv" class="chart chart-lg" width="1000" height="360"></canvas>
+    </div>
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; gap: 24px;">
+      <div><span style="font-size: 12px; color: rgba(255,255,255,0.6);">Average</span><div style="font-size: 16px; font-weight: 500;"><b id="avgv">--</b> °C</div></div>
+      <div><span style="font-size: 12px; color: rgba(255,255,255,0.6);">Min</span><div style="font-size: 16px; font-weight: 500;"><b id="minv">--</b> °C</div></div>
+      <div><span style="font-size: 12px; color: rgba(255,255,255,0.6);">Max</span><div style="font-size: 16px; font-weight: 500;"><b id="maxv">--</b> °C</div></div>
     </div>
   </div>
 </div>
@@ -56,7 +59,9 @@ let pageState = {
 
 function getChartEndpoint(baseEndpoint, selectedDate) {
   if (selectedDate) {
-    return baseEndpoint + '?date=' + encodeURIComponent(selectedDate);
+    // Use per-day endpoint with the new date-specific API
+    // e.g., /api/temp-date?date=2024-01-15
+    return baseEndpoint + '-date?date=' + encodeURIComponent(selectedDate);
   }
 
   const saved = localStorage.getItem('weatherSettings');
@@ -115,6 +120,7 @@ pageState.page = startSimpleSeriesPage({
   padFraction:0.12,
   minPad:0.2,
   nowId:'now',
+  avgId:'avgv',
   minId:'minv',
   maxId:'maxv'
 });
