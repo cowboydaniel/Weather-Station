@@ -78,9 +78,11 @@ function drawLineSeries(ctx, cv, series, opts={}){
     };
   } else if (hasExpectedDuration && hasInterval) {
     // Relative time with expected duration: newest point at right edge, older points offset by elapsed time
+    const span = (series.length - 1) * opts.interval_ms;
+    const startOffset = Math.max(0, opts.expectedDurationMs - span); // leave leading blank space for missing samples
     getX = (i) => {
-      const elapsedFromNewest = (series.length - 1 - i) * opts.interval_ms;
-      const x = w - (elapsedFromNewest / opts.expectedDurationMs) * w;
+      const elapsedFromStart = startOffset + i * opts.interval_ms;
+      const x = (elapsedFromStart / opts.expectedDurationMs) * w;
       return Math.max(0, Math.min(w, x));
     };
   } else {
@@ -136,7 +138,7 @@ function drawXAxisTicks(ctx, w, h, numPoints, interval_ms, timeMode, timestamps,
       return hours.toString().padStart(2, '0') + ':00';
     };
   } else {
-    const durationMsForTicks = expectedDurationMs || (numPoints * interval_ms);
+    const durationMsForTicks = expectedDurationMs || ((numPoints - 1) * interval_ms);
 
     if (interval_ms >= HOURLY_MS) {
       // Relative time for hourly data
