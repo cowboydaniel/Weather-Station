@@ -36,7 +36,7 @@ static void initWiFiManager() {
 
 // Attempt non-blocking WiFi connection (call periodically from loop)
 // Returns true if currently connected, false if disconnected
-static bool updateWiFiStatus(const char* ssid, const char* pass, const char* device_name = nullptr) {
+static bool updateWiFiStatus(const char* ssid, const char* pass) {
   uint32_t now = millis();
 
   // Don't check more frequently than CHECK_INTERVAL
@@ -53,14 +53,6 @@ static bool updateWiFiStatus(const char* ssid, const char* pass, const char* dev
   if (!wifi_mgr.is_connected && currently_connected) {
     wifi_mgr.is_connected = true;
     wifi_mgr.backoff_delay_ms = wifi_mgr.MIN_BACKOFF_MS;  // Reset backoff
-
-    // Set hostname if provided
-    if (device_name) {
-      WiFi.setHostname(device_name);
-      Serial.print("[WiFiMgr] Hostname set to: ");
-      Serial.println(device_name);
-    }
-
     Serial.print("[WiFiMgr] Connected! IP: ");
     Serial.println(WiFi.localIP());
     return true;
