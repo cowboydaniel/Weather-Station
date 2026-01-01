@@ -334,6 +334,24 @@ static void updateSampling() {
   }
 }
 
+// Helper to extract date parameter from request line
+// e.g., "GET /api/temp?date=2024-01-15 HTTP/1.1" -> "2024-01-15"
+static bool extractDateParam(const String& reqLine, char* dateStr, int maxLen) {
+  int qPos = reqLine.indexOf('?');
+  if (qPos < 0) return false;
+
+  int datePos = reqLine.indexOf("date=", qPos);
+  if (datePos < 0) return false;
+
+  int startPos = datePos + 5;
+  int endPos = reqLine.indexOf(' ', startPos);
+  if (endPos < 0) endPos = reqLine.length();
+
+  int len = min(endPos - startPos, maxLen - 1);
+  reqLine.substring(startPos, startPos + len).toCharArray(dateStr, len + 1);
+  return len > 0;
+}
+
 // API endpoints
 static void sendJSONTemp(WiFiClient &c) {
   c.println("HTTP/1.1 200 OK");
@@ -459,6 +477,90 @@ static void sendJSONSummary(WiFiClient &c) {
   c.print("\"storm\":\""); c.print(stormLabelFromScore(cached_storm)); c.print("\"");
   c.print("}}");
   c.println();
+}
+
+// Available dates endpoint - returns list of dates available in SD card
+static void sendAvailableDates(WiFiClient &c) {
+  c.println("HTTP/1.1 200 OK");
+  c.println("Content-Type: application/json; charset=utf-8");
+  c.println("Cache-Control: no-store");
+  c.println("Connection: close");
+  c.println();
+
+  c.print("{\"ok\":true,\"dates\":[");
+
+  if (sd_info.initialized) {
+    File dataFile = sd.open("data.csv", FILE_READ);
+    if (dataFile) {
+      char line[256];
+      char lastDate[11] = "";
+      bool first = true;
+
+      while (dataFile.available()) {
+        int len = 0;
+        while (dataFile.available() && len < 255) {
+          char c = dataFile.read();
+          if (c == '\n') break;
+          line[len++] = c;
+        }
+        line[len] = '\0';
+
+        if (len > 10) {
+          // Extract date from timestamp (first column is timestamp_ms)
+          // Convert timestamp_ms to date string
+          uint32_t ts_ms = 0;
+          for (int i = 0; i < len && line[i] != ','; i++) {
+            ts_ms = ts_ms * 10 + (line[i] - '0');
+          }
+
+          uint32_t ts_sec = ts_ms / 1000;
+          uint32_t days_since_epoch = ts_sec / 86400;
+
+          // Simple date calculation (valid from 1970)
+          uint16_t year = 1970;
+          uint8_t month = 1, day = 1;
+          uint16_t days_in_year[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+
+          while (days_since_epoch >= 365) {
+            if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+              if (days_since_epoch >= 366) {
+                days_since_epoch -= 366;
+                year++;
+              } else break;
+            } else {
+              days_since_epoch -= 365;
+              year++;
+            }
+          }
+
+          for (int m = 11; m >= 0; m--) {
+            uint16_t day_limit = days_in_year[m];
+            if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+              if (m > 1) day_limit++;
+            }
+            if (days_since_epoch >= day_limit) {
+              month = m + 1;
+              day = days_since_epoch - day_limit + 1;
+              break;
+            }
+          }
+
+          char dateStr[11];
+          snprintf(dateStr, 11, "%04u-%02u-%02u", year, month, day);
+
+          if (strcmp(dateStr, lastDate) != 0) {
+            if (!first) c.print(",");
+            c.print("\""); c.print(dateStr); c.print("\"");
+            strcpy(lastDate, dateStr);
+            first = false;
+          }
+        }
+      }
+      dataFile.close();
+    }
+  }
+
+  c.println("]}");
 }
 
 // Combined dashboard endpoint - returns summary + sparkline data in one request
@@ -1002,6 +1104,9 @@ void loop() {
     isApi = true;
   } else if (reqLine.startsWith("GET /api/stats")) {
     sendJSONStats(client);
+    isApi = true;
+  } else if (reqLine.startsWith("GET /api/available-dates")) {
+    sendAvailableDates(client);
     isApi = true;
   } else if (reqLine.startsWith("GET /api/temp-hourly")) {
     sendJSONTempHourly(client);

@@ -33,6 +33,13 @@ static void sendPageTemp(WiFiClient &client) {
       <div class="kpi">Now: <b id="now">--</b></div>
       <div class="kpi">Min: <b id="minv">--</b></div>
       <div class="kpi">Max: <b id="maxv">--</b></div>
+      <div style="flex: 1;"></div>
+      <div class="kpi">
+        Date:
+        <select id="dateSelect" style="padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; font-size: 14px;">
+          <option value="">Today (Live)</option>
+        </select>
+      </div>
     </div>
     <div style="margin-top:12px">
       <canvas id="cv" class="chart chart-lg" width="1000" height="360"></canvas>
@@ -41,7 +48,17 @@ static void sendPageTemp(WiFiClient &client) {
 </div>
 
 <script>
-function getChartEndpoint(baseEndpoint) {
+let pageState = {
+  baseEndpoint: '/api/temp',
+  selectedDate: '',
+  page: null
+};
+
+function getChartEndpoint(baseEndpoint, selectedDate) {
+  if (selectedDate) {
+    return baseEndpoint + '?date=' + encodeURIComponent(selectedDate);
+  }
+
   const saved = localStorage.getItem('weatherSettings');
   let graphSpan = 600; // default
   if (saved) {
@@ -58,8 +75,38 @@ function getChartEndpoint(baseEndpoint) {
   return baseEndpoint;
 }
 
-startSimpleSeriesPage({
-  endpoint: getChartEndpoint('/api/temp'),
+function loadAvailableDates() {
+  fetch('/api/available-dates?metric=temp', {cache:'no-store'})
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok && Array.isArray(data.dates)) {
+        const select = $('dateSelect');
+        if (!select) return;
+
+        data.dates.forEach(date => {
+          const option = document.createElement('option');
+          option.value = date;
+          option.textContent = date;
+          select.appendChild(option);
+        });
+      }
+    })
+    .catch(e => console.log('Could not load dates:', e));
+}
+
+const dateSelect = $('dateSelect');
+if (dateSelect) {
+  dateSelect.addEventListener('change', (e) => {
+    pageState.selectedDate = e.target.value;
+    const newEndpoint = getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate);
+    if (pageState.page && pageState.page.tick) {
+      pageState.page.tick();
+    }
+  });
+}
+
+pageState.page = startSimpleSeriesPage({
+  endpoint: getChartEndpoint(pageState.baseEndpoint, pageState.selectedDate),
   canvasId:'cv',
   unit:' °C',
   decimals:1,
@@ -71,6 +118,8 @@ startSimpleSeriesPage({
   minId:'minv',
   maxId:'maxv'
 });
+
+loadAvailableDates();
 </script>
 </body></html>
 )HTML");
