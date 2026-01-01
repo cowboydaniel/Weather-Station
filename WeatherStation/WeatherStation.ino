@@ -106,6 +106,9 @@ volatile uint32_t loop_count = 0;
 volatile uint32_t last_loop_rate_ms = 0;
 volatile float loop_rate_hz = 0;
 
+// NTP time sync tracking
+static bool ntp_sync_attempted = false;
+
 static void configureBME() {
   bme.setTemperatureOversampling(BME680_OS_4X);
   bme.setHumidityOversampling(BME680_OS_2X);
@@ -1020,23 +1023,21 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
     return false;
   }
 
+  // Per-day CSV files (YYYY-MM-DD.csv) are loaded on-demand via API endpoints
+  // This avoids loading all historical data at startup
+  // Legacy data.csv support: if it exists, load it into ring buffers for live display
+
   uint32_t total_samples = 0;
 
-  // Try to load recent per-day files (last 7 days)
-  // Note: This runs before NTP sync, so we load a limited amount
-  Serial.println("Loading recent daily CSV files...");
-
-  // First, try to load from legacy data.csv if no daily files exist
-  // This provides backward compatibility
   if (sd.exists("data.csv")) {
-    Serial.println("Loading legacy data.csv...");
+    Serial.println("Found legacy data.csv - loading for live display...");
     uint32_t samples = loadCSVFile("data.csv", tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
     total_samples += samples;
     Serial.print("Loaded ");
     Serial.print(samples);
     Serial.println(" samples from legacy data.csv");
   } else {
-    Serial.println("No data.csv found. Daily files will be loaded on-demand.");
+    Serial.println("Per-day CSV files ready for on-demand loading (YYYY-MM-DD.csv)");
   }
 
   sd_info.logged_samples = total_samples;
@@ -1131,17 +1132,6 @@ void setup() {
     Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
   }
 
-  // Wait a bit for WiFi to connect, then sync time
-  Serial.println("Waiting for WiFi to connect for time sync...");
-  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
-    delay(250);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    configureNTPTime();
-  } else {
-    Serial.println("[Setup] WiFi not ready yet, time will be synced in the background");
-  }
-
   last_env_ms = millis() - ENV_INTERVAL_MS;
   last_gas_ms = millis() - GAS_INTERVAL_MS;
   last_slp_trend_ms = millis() - SLP_TREND_SAMPLE_MS;
@@ -1161,6 +1151,12 @@ void loop() {
 
   // Check WiFi status and attempt reconnection if needed
   updateWiFiStatus(ssid, pass);
+
+  // Sync time via NTP once WiFi is connected (happens once)
+  if (!ntp_sync_attempted && WiFi.status() == WL_CONNECTED) {
+    ntp_sync_attempted = true;
+    configureNTPTime();
+  }
 
   // Calculate loop rate (update every second)
   loop_count++;
