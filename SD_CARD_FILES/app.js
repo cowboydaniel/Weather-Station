@@ -219,8 +219,8 @@ function startSimpleSeriesPage(cfg){
     }catch(e){}
   };
   tick();
-  setInterval(tick, cfg.pollMs || 2000);
-  return {tick, render, chart};
+  const intervalId = setInterval(tick, cfg.pollMs || 2000);
+  return {tick, render, chart, intervalId};
 }
 
 function sparkline(points, polyId, fillId){
