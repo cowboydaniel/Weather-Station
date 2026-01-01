@@ -1262,6 +1262,16 @@ void setup() {
   // Prime
   updateSampling();
 
+  // Initialize SD card before starting server (needed for static asset files)
+  Serial.println("Initializing SD card...");
+  if (initSDCard()) {
+    // Load historical data from CSV into ring buffers
+    loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
+    sd_initialized = true;
+  } else {
+    Serial.println("WARNING: SD card initialization failed, but web server will continue");
+  }
+
   server.begin();
   Serial.println("Web server started");
   Serial.print("Open browser to: http://");
@@ -1278,19 +1288,6 @@ void loop() {
   if (!ntp_sync_attempted && WiFi.status() == WL_CONNECTED) {
     ntp_sync_attempted = true;
     ntp_sync_successful = configureNTPTime();
-  }
-
-  // Initialize SD card after successful NTP sync (happens once)
-  // This ensures files are created with correct timestamps
-  if (ntp_sync_successful && !sd_initialized) {
-    sd_initialized = true;
-    Serial.println("Initializing SD card...");
-    if (initSDCard()) {
-      // Load historical data from CSV into ring buffers
-      loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
-    } else {
-      Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
-    }
   }
 
   // Calculate loop rate (update every second)
