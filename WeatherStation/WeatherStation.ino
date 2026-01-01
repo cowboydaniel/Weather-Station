@@ -580,7 +580,6 @@ static void sendAvailableDates(WiFiClient &c) {
       dataFile.close();
     }
   }
-
   c.println("]}");
 }
 
@@ -869,17 +868,23 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
     return;
   }
 
-  c.print("{\"ok\":true,\"unit\":");
-  if (metric_field == 1) c.print("\"C\"");
-  else if (metric_field == 2) c.print("\"%\"");
-  else if (metric_field == 3) c.print("\"hPa\"");
-  else c.print("\"kOhm\"");
-  c.print(",\"interval_ms\":1000,\"data\":[");
+  bool has_data = false;
+  bool first_data = true;
+
+  auto beginResponse = [&]() {
+    if (has_data) return;
+    c.print("{\"ok\":true,\"unit\":");
+    if (metric_field == 1) c.print("\"C\"");
+    else if (metric_field == 2) c.print("\"%\"");
+    else if (metric_field == 3) c.print("\"hPa\"");
+    else c.print("\"kOhm\"");
+    c.print(",\"interval_ms\":1000,\"data\":[");
+    has_data = true;
+  };
 
   // Parse and output data with timestamps
   char line[128];
   int line_len = 0;
-  bool first_data = true;
   int line_count = 0;
 
   while (logFile.available() && line_count < 100000) {  // Safety limit
@@ -924,6 +929,7 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
 
         // Output as [timestamp, value] pair
         if (isfinite(value)) {
+          beginResponse();
           if (!first_data) c.print(",");
           c.print("[");
           char ts_buf[32];
@@ -945,6 +951,15 @@ static void sendJSONDateData(WiFiClient &c, const String& dateStr, const char* m
         line[line_len++] = c_byte;
       }
     }
+  }
+
+  if (!has_data) {
+    logFile.close();
+    Serial.print("[API] ");
+    Serial.print(filename);
+    Serial.println(" contains no valid data for requested metric");
+    c.print("{\"ok\":false,\"error\":\"No data for date\"}");
+    return;
   }
 
   logFile.close();
