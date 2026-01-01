@@ -291,33 +291,6 @@ static const char* stormLabelFromScore(int s) {
   return "very high";
 }
 
-// Lightweight request line reader with size cap to avoid heap churn/overflow
-static bool readLineLimited(WiFiClient &client, char *out, size_t outLen, uint32_t timeoutMs, bool &overflowed) {
-  if (outLen == 0) return false;
-  uint32_t start = millis();
-  size_t pos = 0;
-  overflowed = false;
-
-  while (client.connected() && (millis() - start < timeoutMs)) {
-    if (!client.available()) {
-      delay(1);
-      continue;
-    }
-    int c = client.read();
-    if (c < 0) continue;
-    if (c == '\n') break;
-    if (c == '\r') continue;
-    if (pos < outLen - 1) {
-      out[pos++] = (char)c;
-    } else {
-      overflowed = true;
-    }
-  }
-
-  out[pos] = '\0';
-  return pos > 0;
-}
-
 // Buffered JSON series writer (chronological order)
 // Uses chunked writes to reduce WiFiClient overhead
 static char jsonBuf[256];  // Static buffer for building JSON chunks
@@ -1747,29 +1720,34 @@ void loop() {
 
   IPAddress rip = client.remoteIP();
 
-  // Request line (bounded)
-  char reqLineBuf[128];
-  bool overflow = false;
-  if (!readLineLimited(client, reqLineBuf, sizeof(reqLineBuf), 1500, overflow)) {
+  // Request line
+  unsigned long start = millis();
+  String reqLine = "";
+  while (client.connected() && (millis() - start < 1500)) {
+    if (client.available()) {
+      reqLine = client.readStringUntil('\n');
+      break;
+    }
+  }
+
+  // Drain headers
+  start = millis();
+  while (client.connected() && (millis() - start < 1500)) {
+    if (client.available()) {
+      String line = client.readStringUntil('\n');
+      if (line == "\r") break;
+    }
+  }
+
+  if (reqLine.length() == 0) {
     Serial.print("Client "); Serial.print(rip);
-    Serial.println(" -> (timeout/empty)");
+    Serial.println(" -> (timeout)");
     client.stop();
     return;
   }
 
-  // Drain headers (ignore content)
-  for (int i = 0; i < 50 && client.connected(); i++) {
-    char headerBuf[64];
-    bool headerOverflow = false;
-    if (!readLineLimited(client, headerBuf, sizeof(headerBuf), 50, headerOverflow)) break;
-    if (headerBuf[0] == '\0') break;
-  }
-
-  String reqLine = String(reqLineBuf);
   Serial.print("Client "); Serial.print(rip);
-  Serial.print(" -> ");
-  if (overflow) Serial.print("(truncated) ");
-  Serial.println(reqLine);
+  Serial.print(" -> "); Serial.println(reqLine);
 
   unsigned long reqStart = millis();
   bool isApi = false;
