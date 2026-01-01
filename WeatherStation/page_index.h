@@ -123,7 +123,22 @@ static void sendPageIndex(WiFiClient &client) {
 </div>
 
 <script>
-const el = (id) => document.getElementById(id);
+const NULL_EL = new Proxy({
+  style: {},
+  classList: { add(){}, remove(){}, toggle(){}, contains(){ return false; } },
+  addEventListener(){}, setAttribute(){}
+}, {
+  get(target, prop) { return prop in target ? target[prop] : undefined; },
+  set(target, prop, value) { target[prop] = value; return true; }
+});
+const el = (id) => {
+  const node = document.getElementById(id);
+  if (!node) {
+    console.warn(`Missing element #${id}`);
+    return NULL_EL;
+  }
+  return node;
+};
 
 function setDot(ok){
   const dot = el('dot');
