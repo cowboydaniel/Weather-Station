@@ -35,15 +35,8 @@ static void sendPageGas(WiFiClient &client) {
     <div class="timeframe-selector">
       <span class="timeframe-label">Time span:</span>
       <select id="timeframeSelect">
-        <option value="60">1 minute</option>
-        <option value="300">5 minutes</option>
         <option value="600" selected>10 minutes</option>
-        <option value="21600">6 hours</option>
-        <option value="43200">12 hours</option>
-        <option value="86400">24 hours</option>
       </select>
-      <span class="timeframe-label" style="margin-left: 16px;">Date:</span>
-      <button id="datePickerBtn" style="padding: 6px 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">Today (Live)</button>
     </div>
     <div style="margin-top:12px">
       <canvas id="cv" class="chart chart-lg" width="1000" height="360"></canvas>
