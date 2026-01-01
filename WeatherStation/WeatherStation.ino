@@ -10,7 +10,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <limits.h>
-#include <new>
 
 // SD card logging with software SPI
 #include "sd_logging.h"
@@ -113,12 +112,11 @@ struct RingS16 {
   const int16_t sentinel;
 
   RingS16(int n, float s) : size(n), next(0), count(0), scale(s), sentinel(INT16_MIN) {
-    buf = new (std::nothrow) int16_t[n];
+    buf = new int16_t[n];
     reset();
   }
 
   void reset() {
-    if (!buf) return;
     next = 0;
     count = 0;
     for (int i = 0; i < size; i++) {
@@ -127,7 +125,6 @@ struct RingS16 {
   }
 
   void pushFloat(float v) {
-    if (!buf) return;
     if (!isfinite(v)) {
       buf[next] = sentinel;
     } else {
@@ -351,12 +348,6 @@ static void jsonWriteSeriesScaled(WiFiClient &c, const RingS16 &r, int decimals)
   jsonBufPos = 0;  // Reset buffer
   jsonAppend(c, "[");
 
-  if (!r.buf) {
-    jsonAppend(c, "]");
-    jsonFlush(c);
-    return;
-  }
-
   int count = r.count;
   int start = r.next - count;
   while (start < 0) start += r.size;
@@ -562,7 +553,7 @@ static void sendJSON24hSeries(WiFiClient &c, const RingS16 &series, const char* 
   c.println("Connection: close");
   c.println();
 
-  if (!downsample24h_ready || series.count == 0 || !series.buf) {
+  if (!downsample24h_ready || series.count == 0) {
     c.print("{\"ok\":false,\"error\":\"24h cache not ready\"}");
     return;
   }
