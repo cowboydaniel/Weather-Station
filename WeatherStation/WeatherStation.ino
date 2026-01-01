@@ -1181,8 +1181,8 @@ void getCurrentDateString(char* dateStr, int maxLen) {
   // Format: YYYY-MM-DD
   snprintf(dateStr, maxLen, "%04d-%02d-%02d",
            currentTime.getYear(),
-           currentTime.getMonth(),
-           currentTime.getDay());
+           Month2int(currentTime.getMonth()),
+           currentTime.getDayOfMonth());
 }
 
 // Get current timestamp in milliseconds (real clock time, not millis())
@@ -1191,13 +1191,12 @@ static unsigned long getCurrentTimeMs() {
   RTC.getTime(currentTime);
 
   // Convert RTCTime to Unix timestamp
-  // RTCTime constructor takes unix timestamp, so we need to reconstruct it
   struct tm tm_info = {
-    .tm_sec = currentTime.getSecond(),
-    .tm_min = currentTime.getMinute(),
+    .tm_sec = currentTime.getSeconds(),
+    .tm_min = currentTime.getMinutes(),
     .tm_hour = currentTime.getHour(),
-    .tm_mday = currentTime.getDay(),
-    .tm_mon = currentTime.getMonth() - 1,  // tm_mon is 0-11
+    .tm_mday = currentTime.getDayOfMonth(),
+    .tm_mon = Month2int(currentTime.getMonth()) - 1,  // tm_mon is 0-11
     .tm_year = currentTime.getYear() - 1900,  // tm_year is years since 1900
     .tm_isdst = -1  // Let mktime determine DST
   };
