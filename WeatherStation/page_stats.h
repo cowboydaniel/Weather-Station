@@ -57,6 +57,10 @@ static void sendPageStats(WiFiClient &client) {
         <span class="stat-value" id="ssid">--</span>
       </div>
       <div class="stat-row">
+        <span class="stat-label">Device Name</span>
+        <span class="stat-value" id="device-name">--</span>
+      </div>
+      <div class="stat-row">
         <span class="stat-label">Signal Strength (RSSI)</span>
         <span class="stat-value" id="rssi">--</span>
       </div>
@@ -329,6 +333,7 @@ async function fetchStats() {
     el('net-status-dot').className = 'status-dot ' + (data.network.connected ? 'green' : 'red');
     el('ip-addr').textContent = data.network.ip || '--';
     el('ssid').textContent = data.network.ssid || '--';
+    el('device-name').textContent = data.network.device_name || '--';
     el('rssi').textContent = data.network.rssi + ' dBm';
 
     const quality = rssiToQuality(data.network.rssi);
