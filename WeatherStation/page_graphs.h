@@ -160,12 +160,12 @@ static void sendPageGraphs(WiFiClient &client, const char* timeframe, int timefr
 
   // Continue with JavaScript
   client.println(R"HTML(
-const USE_24H_CACHE = TIMEFRAME >= 86400;
+const USE_DATE_API = TIMEFRAME >= 86400;
 const warningEl = document.getElementById('graphWarning');
 
 // Set active nav and subtitle
 document.getElementById('nav-' + TIMEFRAME_ID).classList.add('active');
-document.getElementById('subtitle').textContent = TIMEFRAME_LABEL + ' view' + (USE_24H_CACHE ? ' (cached 24h bins)' : ' (live buffer)');
+document.getElementById('subtitle').textContent = TIMEFRAME_LABEL + ' view' + (USE_DATE_API ? ' (from SD card)' : ' (live buffer)');
 
 // Setup canvases
 const charts = {
@@ -183,7 +183,7 @@ function getTodayStr() {
 
 // Slice series to timeframe for live data
 function sliceSeries(series, intervalMs) {
-  if (USE_24H_CACHE || !Array.isArray(series) || series.length === 0) return series;
+  if (USE_DATE_API || !Array.isArray(series) || series.length === 0) return series;
 
   const hasInterval = typeof intervalMs === 'number' && intervalMs > 0;
   if (!hasInterval) return series;
@@ -202,22 +202,6 @@ function sliceSeries(series, intervalMs) {
 
 function normalizeMetricData(metric, mode, data) {
   if (!data || !data.ok) return null;
-
-  if (mode === '24h') {
-    if (Array.isArray(data.series) && data.series.length) {
-      const intervalMs = Number(data.interval_ms) || 60000;
-      const startMs = data.start_ms !== undefined ? Number(data.start_ms) : NaN;
-      const hasStart = Number.isFinite(startMs);
-      return {
-        series: data.series,
-        timestamps: hasStart ? data.series.map((_, i) => startMs + i * intervalMs) : null,
-        interval_ms: intervalMs,
-        timeMode: hasStart ? 'absolute' : null,
-        expectedDurationMs: 86400000
-      };
-    }
-    return null;
-  }
 
   if (mode === 'date') {
     if (Array.isArray(data.data) && data.data.length) {
@@ -251,11 +235,10 @@ function normalizeMetricData(metric, mode, data) {
 
 async function fetchMetric(metric) {
   const today = getTodayStr();
-  const sources = USE_24H_CACHE ? [
-    { url: `/api/${metric}-24h`, mode: '24h', label: 'cached 24h bins' },
+  const sources = USE_DATE_API ? [
+    { url: `/api/${metric}-date?date=${today}`, mode: 'date', label: 'daily file' },
     { url: `/api/${metric}-hourly`, mode: 'hourly', label: 'hourly history' },
-    { url: `/api/${metric}`, mode: 'live', label: 'live buffer' },
-    { url: `/api/${metric}-date?date=${today}`, mode: 'date', label: 'daily file' }
+    { url: `/api/${metric}`, mode: 'live', label: 'live buffer' }
   ] : [
     { url: `/api/${metric}`, mode: 'live', label: 'live buffer' },
     { url: `/api/${metric}-hourly`, mode: 'hourly', label: 'hourly history' }
