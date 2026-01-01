@@ -2,6 +2,9 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h>
+#include <RTC.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
 #include <math.h>
 #include <time.h>
 
@@ -35,6 +38,10 @@ const char* timezone_str = "AEST-10AEDT,M10.1.0,M4.1.0";  // Australian Eastern 
 WiFiServer server(80);
 Adafruit_BME680 bme;
 uint8_t BME_ADDR = 0x76;
+
+// NTP and RTC
+WiFiUDP ntpUdp;
+NTPClient timeClient(ntpUdp, "pool.ntp.org", 0, 60000);  // 0 offset (UTC), 60s update interval
 
 // Sampling intervals
 const uint32_t ENV_INTERVAL_MS = 1000;  // temp/hum/pressure
@@ -108,6 +115,8 @@ volatile float loop_rate_hz = 0;
 
 // NTP time sync tracking
 static bool ntp_sync_attempted = false;
+static bool ntp_sync_successful = false;
+static bool sd_initialized = false;
 
 static void configureBME() {
   bme.setTemperatureOversampling(BME680_OS_4X);
@@ -1117,39 +1126,51 @@ bool loadHistoryFromSD(RingF &tempSeries, RingF &humSeries, RingF &pressSeries,
 }
 
 // ============ NTP TIME CONFIGURATION ============
-// Configure time via NTP (requires WiFi connection)
-// Note: Arduino WiFiS3 uses WiFi module's internal time, no configTime() needed
+// Configure time via NTP and set the internal RTC
 static bool configureNTPTime() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[Time] WiFi not connected, cannot sync time");
     return false;
   }
 
-  Serial.println("[Time] Syncing time via NTP (WiFi module internal)...");
+  Serial.println("[Time] Syncing time via NTP...");
 
-  // Set timezone for correct local time
-  setenv("TZ", timezone_str, 1);
-  tzset();
+  // Initialize NTP client and wait for first update
+  timeClient.begin();
 
-  // Wait for WiFi module to sync time (happens automatically)
-  // Arduino WiFiS3 board syncs time internally via WiFi module
-  // Just wait a bit and verify time is valid
-  time_t now = time(nullptr);
+  // Wait for NTP update (up to 10 seconds with 100ms retries)
   int attempts = 0;
-  while (now < 24 * 3600 && attempts < 100) {  // Time should be after Jan 1, 1970 00:00:24
+  while (!timeClient.update() && attempts < 100) {
     delay(100);
-    now = time(nullptr);
     attempts++;
   }
 
-  if (now > 24 * 3600) {
-    Serial.print("[Time] Time is valid. Current time: ");
-    Serial.println(ctime(&now));
-    return true;
-  } else {
-    Serial.println("[Time] Time sync not yet available");
+  if (attempts >= 100) {
+    Serial.println("[Time] NTP sync failed - timeout");
     return false;
   }
+
+  // Get Unix timestamp from NTP
+  unsigned long unixTime = timeClient.getEpochTime();
+  Serial.print("[Time] Got NTP timestamp: ");
+  Serial.println(unixTime);
+
+  // Set the internal RTC with the NTP time
+  RTC.begin();
+  RTCTime timeToSet = RTCTime(unixTime);
+  RTC.setTime(timeToSet);
+
+  // Set timezone for correct local time display
+  setenv("TZ", timezone_str, 1);
+  tzset();
+
+  // Verify RTC was set correctly
+  RTCTime currentTime;
+  RTC.getTime(currentTime);
+  Serial.print("[Time] RTC set successfully. Current time: ");
+  Serial.println(String(currentTime));
+
+  return true;
 }
 
 // Get current date as YYYY-MM-DD string
@@ -1194,14 +1215,8 @@ void setup() {
   }
   configureBME();
 
-  // Initialize SD card (software SPI - no WiFi conflicts)
-  Serial.println("Initializing SD card...");
-  if (initSDCard()) {
-    // Load historical data from CSV into ring buffers
-    loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
-  } else {
-    Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
-  }
+  // SD card initialization is deferred until after NTP time sync succeeds
+  // This ensures files are created with correct timestamps
 
   last_env_ms = millis() - ENV_INTERVAL_MS;
   last_gas_ms = millis() - GAS_INTERVAL_MS;
@@ -1226,7 +1241,20 @@ void loop() {
   // Sync time via NTP once WiFi is connected (happens once)
   if (!ntp_sync_attempted && WiFi.status() == WL_CONNECTED) {
     ntp_sync_attempted = true;
-    configureNTPTime();
+    ntp_sync_successful = configureNTPTime();
+  }
+
+  // Initialize SD card after successful NTP sync (happens once)
+  // This ensures files are created with correct timestamps
+  if (ntp_sync_successful && !sd_initialized) {
+    sd_initialized = true;
+    Serial.println("Initializing SD card...");
+    if (initSDCard()) {
+      // Load historical data from CSV into ring buffers
+      loadHistoryFromSD(tempSeries, humSeries, pressSeries, gasSeries, slpTrend);
+    } else {
+      Serial.println("WARNING: SD card initialization failed, continuing without SD logging");
+    }
   }
 
   // Calculate loop rate (update every second)
