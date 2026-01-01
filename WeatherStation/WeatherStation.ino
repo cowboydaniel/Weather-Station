@@ -313,9 +313,9 @@ static void updateSampling() {
     // Update derived values when environment data changes
     updateCachedDerived();
 
-    // Log to SD card (even if WiFi is disconnected)
-    // Now we have all the calculated values available
-    if (sd_info.initialized) {
+    // Log to SD card (even if WiFi is disconnected) but only after time is synced
+    // This prevents creating CSV files with invalid timestamps before NTP succeeds
+    if (sd_info.initialized && ntp_sync_successful) {
       logSensorReading(now, t_raw, h_raw, p_raw_hpa, cached_slp,
                        cached_dp, cached_hi, cached_tend, cached_storm, g_raw_kohm);
     }
