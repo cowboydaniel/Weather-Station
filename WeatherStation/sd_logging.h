@@ -70,6 +70,25 @@ void getCurrentDateString(char* dateStr, int maxLen);
 
 // All possible sensor data for complete historical logging
 // Logs to per-day files: YYYY-MM-DD.csv
+
+// Lightweight u64 -> string (dec) helper to avoid printf long-long quirks on embedded
+static void u64ToStr(uint64_t v, char* out, size_t outLen) {
+  if (outLen == 0) return;
+  char tmp[21];  // enough for 64-bit unsigned decimal
+  int idx = 0;
+  do {
+    tmp[idx++] = '0' + (v % 10);
+    v /= 10;
+  } while (v != 0 && idx < (int)sizeof(tmp));
+
+  // Reverse into output buffer
+  int outIdx = 0;
+  while (idx > 0 && (size_t)outIdx < outLen - 1) {
+    out[outIdx++] = tmp[--idx];
+  }
+  out[outIdx] = '\0';
+}
+
 bool logSensorReading(uint64_t timestamp_ms,
                       float temp_c, float hum_pct,
                       float press_station_hpa, float press_sealevel_hpa,
@@ -105,15 +124,20 @@ bool logSensorReading(uint64_t timestamp_ms,
 
   // Format: timestamp_ms,temp_c,humidity_pct,pressure_station_hpa,pressure_sealevel_hpa,
   //         dew_point_c,heat_index_c,pressure_tendency_hpa_per_3h,storm_score,gas_kohm
-  char buffer[256];
-  snprintf(buffer, sizeof(buffer),
-           "%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
-           (unsigned long long)timestamp_ms, temp_c, hum_pct,
-           press_station_hpa, press_sealevel_hpa,
-           dew_point_c, heat_index_c,
-           pressure_tendency_hpa_per_3h, storm_score, gas_kohm);
+  char ts_buf[32];
+  u64ToStr(timestamp_ms, ts_buf, sizeof(ts_buf));
 
-  logFile.print(buffer);
+  char buffer[256];
+  int n = snprintf(buffer, sizeof(buffer),
+                   "%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+                   ts_buf, temp_c, hum_pct,
+                   press_station_hpa, press_sealevel_hpa,
+                   dew_point_c, heat_index_c,
+                   pressure_tendency_hpa_per_3h, storm_score, gas_kohm);
+
+  if (n > 0) {
+    logFile.print(buffer);
+  }
   logFile.sync();   // Flush to SD card immediately
   logFile.close();  // Close file
 
